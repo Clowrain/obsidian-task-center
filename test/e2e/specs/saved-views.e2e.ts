@@ -170,6 +170,11 @@ describe("US-724 saved views / custom filters", function () {
     await $('[data-saved-views]').waitForExist({ timeout: 5000 });
 
     await $('[data-saved-view-filter="status"]').click();
+    const statusPopoverWidth = await browser.execute(() => {
+      const popover = document.querySelector<HTMLElement>(".bt-status-popover");
+      return Math.round(popover?.getBoundingClientRect().width ?? 0);
+    });
+    expect(statusPopoverWidth).toBeLessThanOrEqual(150);
     const statusOptions = await browser.execute(() =>
       Array.from(document.querySelectorAll("[data-status-option]")).map((el) => ({
         value: (el as HTMLElement).dataset.statusOption,
@@ -218,6 +223,12 @@ describe("US-724 saved views / custom filters", function () {
 
     await $('[data-saved-view-filter="time-scheduled"]').click();
     await $(".bt-date-popover").waitForExist({ timeout: 3000 });
+
+    const datePresetWidth = await browser.execute(() => {
+      const presets = document.querySelector<HTMLElement>(".bt-date-presets");
+      return Math.round(presets?.getBoundingClientRect().width ?? 0);
+    });
+    expect(datePresetWidth).toBeLessThanOrEqual(170);
 
     const outsideClick = await browser.execute(() => {
       const view = document.querySelector<HTMLElement>(".task-center-view");
