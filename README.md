@@ -173,14 +173,6 @@ npx skills add CorrectRoadH/obsidian-task-center
 | Stamp created date | On | Whether new tasks get `➕ YYYY-MM-DD` |
 | Force mobile layout | Off | Use the phone layout on wider screens |
 
-## Migration
-
-### 0.3.0: Daily Notes owns Quick Add targets
-
-Task Center removed the old `settings.dailyFolder` setting. Quick Add now reads Obsidian's built-in **Daily Notes** core plugin configuration for the target folder and date format.
-
-To migrate, enable **Daily Notes** in **Settings -> Core plugins** and set "New file location" to the folder you want Task Center to write into. If you used the old default, set Daily Notes to `Daily/` for the same behavior.
-
 ## License
 
 MIT.

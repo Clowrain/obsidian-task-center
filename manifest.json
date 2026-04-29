@@ -3,7 +3,7 @@
   "name": "Task Center",
   "version": "0.7.5",
   "minAppVersion": "1.5.0",
-  "description": "Task board with parent-child rendering, natural-language quick add, mobile gestures, and CLI commands for Tasks-style markdown.",
+  "description": "AI-ready task board for Obsidian Tasks with day/week/month views, natural-language Quick Add, task trees, mobile gestures, and CLI commands over plain markdown.",
   "author": "CorrectRoadH",
   "authorUrl": "https://github.com/CorrectRoadH",
   "isDesktopOnly": false

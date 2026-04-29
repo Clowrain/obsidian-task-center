@@ -133,22 +133,19 @@ test("US-32: i18n ZH table must not contain settings.dailyFolder keys — dead i
   }
 });
 
-// ─── migration note test ──────────────────────────────────────────────────────
+// ─── public README cleanup test ───────────────────────────────────────────────
 
-test("US-32: README must document the 0.3.0 breaking change with migration guide for dailyFolder removal", async () => {
-  // Predicted failure: README.md has no 0.3.0 breaking change section for dailyFolder.
-  // Root: migration note has not been written yet.
-  // Fix (green): Engineer/reviewer adds a 0.3.0 breaking change section to README.md with
-  //   - "settings.dailyFolder" (the removed setting name)
-  //   - "Daily Notes" (the replacement SSOT)
-  //   - "Breaking" or "Migration" heading
+test("US-32: README no longer carries the old dailyFolder migration note", async () => {
   const { readFileSync } = await import("node:fs");
   const readme = readFileSync("README.md", "utf8");
-  const hasBreaking = /Breaking|Migration/i.test(readme) && readme.includes("settings.dailyFolder") && readme.includes("Daily Notes");
-  assert.ok(
-    hasBreaking,
-    "README.md must contain a 0.3.0 breaking change / migration section that mentions " +
-      "settings.dailyFolder, Daily Notes, and Breaking/Migration. " +
-      "Add a ## Breaking Changes or ## Migration section describing the dailyFolder removal.",
+  assert.equal(
+    readme.includes("settings.dailyFolder"),
+    false,
+    "README.md should not mention the removed internal settings.dailyFolder key.",
+  );
+  assert.equal(
+    /^##\s+Migration\b/im.test(readme),
+    false,
+    "README.md should not expose a Migration section for the old dailyFolder removal.",
   );
 });
