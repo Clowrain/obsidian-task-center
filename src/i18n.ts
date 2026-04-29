@@ -79,7 +79,6 @@ const EN = {
   "onboarding.mobileBody":
     "Create your first task: tap + Add below, or write `- [ ] My task #tag ⏳ tomorrow [estimate:: 30m]` in any note.",
   "onboarding.cta": "+ Add your first task",
-  "mobile.openTaskCenter": "Task Center",
   "completed.total": "total {actual}m",
 
   // Footer
@@ -346,7 +345,6 @@ const ZH: Partial<typeof EN> = {
   "onboarding.mobileBody":
     "创建第一条任务：点击下方 + 新建，或在任意笔记里写：`- [ ] 第一个任务 #tag ⏳ 明天 [estimate:: 30m]`。",
   "onboarding.cta": "+ 新建第一个任务",
-  "mobile.openTaskCenter": "任务中心",
   "completed.total": "总计 {actual}m",
 
   "footer.status": "{todo} 待办 · {done} 完成 · {overdue} 逾期",

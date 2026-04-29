@@ -31,7 +31,6 @@ import { TabDwellTracker } from "./view/dnd";
 import { UndoStack, UndoEntry, UndoOp } from "./view/undo";
 import { BottomSheet } from "./view/bottom-sheet";
 import { attachCardGestures } from "./view/touch";
-import { MobileDragController } from "./view/drag-mobile";
 import { shouldCloseFilterPopoverOnPointerDown } from "./view/filter-popover";
 import { isMobileMode } from "./platform";
 import { openTaskSourceEditShell } from "./view/source-dialog";
@@ -164,9 +163,6 @@ export class TaskCenterView extends ItemView {
   // confusing than helpful (UX.md §6.7). Capped at 20 entries (UndoStack.MAX).
   // see USER_STORIES.md
   private undoStack: UndoStack;
-  // Mobile drag controller (US-507) — pointer-based replacement for HTML5
-  // DnD that doesn't fire from touch. Lazily created on first mobile drag.
-  private mobileDrag: MobileDragController<TabKey> | null = null;
   private filterPopoverOpen: FilterPopoverKey | null = null;
   private dateCalendarAnchorISO = startOfMonth(todayISO());
   private pendingDateRangeStart: string | null = null;
@@ -277,10 +273,6 @@ export class TaskCenterView extends ItemView {
     this.viewResizeObserver?.disconnect();
     this.viewResizeObserver = null;
     this.dwellTracker.reset();
-    if (this.mobileDrag) {
-      this.mobileDrag.destroy();
-      this.mobileDrag = null;
-    }
   }
 
   private scheduleRefresh() {
@@ -519,27 +511,20 @@ export class TaskCenterView extends ItemView {
   }
 
   /**
-   * US-502 mobile sticky action bar: abandon target on the left,
-   * ➕ Add (open Quick Add) on the right. Always rendered; styles.css
-   * hides it on ≥600px viewports. Drop semantics share the same wiring
-   * as the desktop pool abandon zone via `wireTrashDropTarget`.
+   * US-502 / US-507 mobile sticky action bar: explicit thumb-reachable
+   * entries only. Mobile has no abandon drop target; abandon lives in
+   * swipe / action-sheet paths, while this bar opens Unscheduled + Quick Add.
    */
   private renderMobileActionBar(parent: HTMLElement) {
     const bar = parent.createDiv({ cls: "bt-mobile-action-bar" });
     bar.dataset.mobileEntry = "true";
 
-    const home = bar.createEl("button", {
-      text: tr("mobile.openTaskCenter"),
-      cls: "bt-mobile-home-btn",
+    const unscheduled = bar.createEl("button", {
+      text: tr("tab.unscheduled"),
+      cls: "bt-mobile-unscheduled-btn",
     });
-    home.dataset.mobileAction = "open-task-center";
-    home.addEventListener("click", () => this.setTab("today"));
-
-    const abandon = bar.createDiv({ cls: "bt-mobile-trash" });
-    abandon.dataset.dropZone = "abandon";
-    abandon.createSpan({ cls: "bt-mobile-trash-icon", text: "⏹" });
-    abandon.createSpan({ cls: "bt-mobile-trash-label", text: tr("trash.title") });
-    this.wireTrashDropTarget(abandon);
+    unscheduled.dataset.mobileAction = "open-unscheduled";
+    unscheduled.addEventListener("click", () => this.setTab("unscheduled"));
 
     const add = bar.createEl("button", {
       text: tr("toolbar.add"),
@@ -1262,10 +1247,10 @@ export class TaskCenterView extends ItemView {
   // ---------- Week ----------
 
   // US-101: 7-day Mon–Sun (or Sun–Sat per settings) week view, today
-  // highlighted, prev/next-week navigation. Each day column is a
-  // makeDropZone target so cards dragged across columns rewrite ⏳
-  // (US-121). On mobile this delegates to a vertical collapsible list
-  // (US-503), see expandedDays state above.
+  // highlighted, prev/next-week navigation. Desktop day columns are
+  // makeDropZone targets so cards dragged across columns rewrite ⏳
+  // (US-121). Mobile renders the same columns as vertical rows, but there
+  // is no touch drop target (US-503 / US-507).
   // see USER_STORIES.md
   private renderWeek(parent: HTMLElement) {
     const today = todayISO();
@@ -1427,9 +1412,10 @@ export class TaskCenterView extends ItemView {
   // `renderToolbar`. Each day cell renders up to 6 mini-cards plus a
   // `+N more` overflow chip; tapping the cell on mobile opens the day's
   // task list as a bottom sheet (US-504).
-  // US-122: every cell is a `makeDropZone` target so dragging a card onto
-  // a date in the month grid rewrites its ⏳ to that day — same write
-  // semantics as the week-view day columns (US-121).
+  // US-122: on desktop every cell is a `makeDropZone` target so dragging a
+  // card onto a date in the month grid rewrites its ⏳ to that day — same
+  // write semantics as the week-view day columns (US-121). Mobile taps open
+  // the day's bottom sheet instead (US-504 / US-507).
   // see USER_STORIES.md
   private renderMonth(parent: HTMLElement) {
     const today = todayISO();
@@ -1495,7 +1481,7 @@ export class TaskCenterView extends ItemView {
       for (const t of dayTasks.slice(0, 6)) {
         const chip = list.createDiv({ cls: "bt-mini-card" });
         chip.dataset.taskId = t.id;
-        chip.draggable = true;
+        if (this.contentEl.dataset.mobileLayout !== "true") chip.draggable = true;
         chip.setText(t.title);
         if (t.deadline) {
           const deadlineDays = daysBetween(today, t.deadline);
@@ -1807,15 +1793,15 @@ export class TaskCenterView extends ItemView {
   // US-123: bottom abandon target — dragging a card here marks it
   // `[-] ❌ today` (abandoned), and by US-124 cascades to its `todo`
   // descendants while preserving already-done children as history.
-  // `data-drop-zone="abandon"` is the selector contract; the visible UI
-  // intentionally avoids trash/delete wording.
+  // `data-drop-zone="abandon"` is the desktop selector contract; the visible
+  // UI intentionally avoids trash/delete wording. Mobile does not render an
+  // abandon drop zone.
   // see USER_STORIES.md
   private renderTrashZone(parent: HTMLElement) {
     const trash = parent.createDiv({ cls: "bt-trash" });
     // e2e drop-zone selector: `[data-drop-zone="abandon"]`. Stable across the
-    // visible icon / label / theme. (The mobile action bar carries the
-    // same data attribute on a different element; styles.css hides one
-    // or the other based on viewport width — see UX-mobile.md §2 / §13.)
+    // visible icon / label / theme. Desktop-only; mobile abandon is handled
+    // by swipe / action sheet.
     trash.dataset.dropZone = "abandon";
     trash.createDiv({ cls: "bt-trash-icon", text: "⏹" });
     const label = trash.createDiv({ cls: "bt-trash-label" });
@@ -1828,10 +1814,9 @@ export class TaskCenterView extends ItemView {
   }
 
   /**
-   * Wires `dragover` / `dragleave` / `drop` for any element acting as a
-   * abandon drop target. Drop = `api.drop(id)` (mark `[-] ❌`). Used by both
-   * the desktop pool abandon zone (UX.md §6) and the mobile sticky action
-   * bar (UX-mobile.md §2). Single helper so semantics never diverge.
+   * Wires `dragover` / `dragleave` / `drop` for the desktop abandon target.
+   * Drop = `api.drop(id)` (mark `[-] ❌`). Mobile does not call this helper;
+   * its abandon paths are explicit swipe / action sheet operations.
    */
   private wireTrashDropTarget(el: HTMLElement) {
     el.addEventListener("dragover", (e) => {
@@ -2063,7 +2048,7 @@ export class TaskCenterView extends ItemView {
   ) {
     const card = parent.createDiv({ cls: "bt-card" });
     card.dataset.taskId = t.id;
-    card.draggable = true;
+    if (this.contentEl.dataset.mobileLayout !== "true") card.draggable = true;
     if (this.state.selectedTaskId === t.id) card.addClass("selected");
 
     const quad = this.quadrantClass(t.tags);
@@ -2177,11 +2162,10 @@ export class TaskCenterView extends ItemView {
     // Mobile gestures still need the pointer controller; source/context
     // editing is now the single-click source shell on every platform.
     if (isMobileMode()) {
-      // Unified mobile gesture controller (UX-mobile §13 #6: long-press +
-      // drag + swipe must share one state machine).
+      // Unified mobile gesture controller (UX-mobile §13 #6): long-press,
+      // scroll cancellation, and swipe share one state machine.
       //   US-506: hold N ms still → openCardActionSheet (action menu)
-      //   US-507: hold 250ms then move → pointer-drag (with 800ms cross-
-      //           tab dwell + 60px auto-scroll, see view/drag-mobile.ts)
+      //   US-507: no mobile drag/drop; movement routes to scroll/swipe.
       //   US-508: swipe ≥ 30% left → done; ≥ 30% right → drop; both with
       //           1s undo toast (settings.mobileSwipeEnabled gates).
       //   US-510: swipe is opt-out via settings (platform-conditional UI).
@@ -2189,7 +2173,6 @@ export class TaskCenterView extends ItemView {
       const settings = this.plugin.settings;
       attachCardGestures(card, {
         longPressMs: settings.mobileLongPressMs,
-        dragArmMs: 250,
         moveThresholdPx: 4,
         swipeThresholdRatio: 0.3,
         onLongPress: () => this.openCardActionSheet(t),
@@ -2201,108 +2184,7 @@ export class TaskCenterView extends ItemView {
         onSwipeRight: settings.mobileSwipeEnabled
           ? () => { void this.swipeAction(t, "drop"); }
           : undefined,
-        onDragArmed: (e) => this.mobileDragSession(card, t, e.clientX, e.clientY),
       });
-    }
-  }
-
-  /**
-   * Lazy-initialise the mobile drag controller and start a session for
-   * `card`. Called from `attachCardGestures.onDragArmed`. The controller
-   * owns the floating clone + hit-testing + dwell + edge-scroll; this
-   * function only wires its drop handlers back into the existing
-   * api.schedule / api.drop / api.nest pipeline (so undo + animation +
-   * notice toasts all reuse the desktop code paths).
-   */
-  private mobileDragSession(card: HTMLElement, t: ParsedTask, x: number, y: number) {
-    if (!this.mobileDrag) {
-      this.mobileDrag = new MobileDragController<TabKey>({
-        scrollEl: this.contentEl,
-        contentEl: this.contentEl,
-        // UX-mobile §5.2: 800ms (vs desktop 600ms — fingers are jitterier).
-        dwellMs: 800,
-        // UX-mobile §5.2: 60px edge → auto-scroll.
-        edgeScrollPx: 60,
-        edgeScrollMaxSpeed: 600,
-        getCurrentTab: () => this.state.tab,
-        onTabSwitch: (tab) => this.setTab(tab),
-        onScheduleDrop: (taskId, dateISO) => { void this.handleMobileScheduleDrop(taskId, dateISO); },
-        onTrashDrop: (taskId) => { void this.handleMobileTrashDrop(taskId); },
-        onNestDrop: (droppedId, parentId) => { void this.handleMobileNestDrop(droppedId, parentId); },
-      });
-    }
-    return this.mobileDrag.begin(card, t.id, x, y);
-  }
-
-  private async handleMobileScheduleDrop(taskId: string, dateISO: string): Promise<void> {
-    const task = this.tasks.find((x) => x.id === taskId);
-    if (!task) return;
-    if ((task.scheduled ?? null) === dateISO) return; // no-op same-day drop
-    try {
-      await this.runWithRemoveAnim(taskId, async () => {
-        const r = await this.api.schedule(taskId, dateISO);
-        if (!r.unchanged) {
-          this.undoStack.push({
-            label: `⏳ ${dateISO}`,
-            ops: [{ path: task.path, line: task.line, before: [r.before], after: [r.after] }],
-          });
-          new Notice(tr("notice.scheduled", { date: dateISO }));
-        }
-      });
-    } catch (err) {
-      new Notice(tr("notice.error", { msg: (err as Error).message }), 4000);
-      this.scheduleRefresh();
-    }
-  }
-
-  private async handleMobileTrashDrop(taskId: string): Promise<void> {
-    const task = this.tasks.find((x) => x.id === taskId);
-    if (!task) return;
-    try {
-      await this.runWithRemoveAnim(taskId, async () => {
-        const r = await this.api.drop(taskId);
-        if (!r.unchanged) {
-          this.undoStack.push({
-            label: tr("trash.dropped"),
-            ops: [{ path: task.path, line: task.line, before: [r.before], after: [r.after] }],
-          });
-          new Notice(tr("trash.dropped"));
-        }
-      });
-    } catch (err) {
-      new Notice(tr("notice.error", { msg: (err as Error).message }), 4000);
-      this.scheduleRefresh();
-    }
-  }
-
-  private async handleMobileNestDrop(droppedId: string, parentId: string): Promise<void> {
-    if (droppedId === parentId) return;
-    const droppedTask = this.tasks.find((x) => x.id === droppedId);
-    const parentTask = this.tasks.find((x) => x.id === parentId);
-    if (!droppedTask || !parentTask) return;
-    const awaitCachePaths = [parentTask.path];
-    if (droppedTask.path !== parentTask.path) awaitCachePaths.push(droppedTask.path);
-    try {
-      await this.runWithRemoveAnim(droppedId, async () => {
-        const r = await this.api.nest(droppedId, parentId);
-        if (!r.unchanged) {
-          if (r.undoOps && r.undoOps.length > 0) {
-            this.undoStack.push({
-              label: `nest under "${parentTask.title.slice(0, 20)}"`,
-              ops: r.undoOps,
-            });
-          }
-          new Notice(
-            tr("notice.nested", {
-              title: parentTask.title,
-              where: r.crossFile ? tr("notice.crossFile") : "",
-            }),
-          );
-        }
-      }, { awaitCachePaths });
-    } catch (err) {
-      new Notice(tr("notice.error", { msg: (err as Error).message }), 6000);
-      this.scheduleRefresh();
     }
   }
 
@@ -2369,7 +2251,7 @@ export class TaskCenterView extends ItemView {
   ) {
     const subCard = container.createDiv({ cls: "bt-subcard" });
     subCard.dataset.taskId = c.id;
-    subCard.draggable = true;
+    if (this.contentEl.dataset.mobileLayout !== "true") subCard.draggable = true;
     if (this.state.selectedTaskId === c.id) subCard.addClass("selected");
 
     const check = subCard.createEl("button", { cls: "bt-sub-check", text: statusIcon(c.status) });

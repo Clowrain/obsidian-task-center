@@ -187,7 +187,7 @@ export default class TaskCenterPlugin extends Plugin {
   /**
    * Test hook (task #44). Forces `isMobileMode()` to return true so the
    * WDIO desktop Chromium runner can exercise mobile-only behavior
-   * (`Platform.isMobile`-gated long-press / swipe / pointer-drag /
+   * (`Platform.isMobile`-gated long-press / swipe /
    * Quick Add bottom-sheet styling). Default value is false; production
    * never calls this.
    *

@@ -1504,7 +1504,7 @@
     border-bottom: 1px solid var(--background-modifier-border);
   }
 
-/* Bottom sticky action bar (abandon + ➕) — mobile only. */
+/* Bottom sticky action bar (Unscheduled + ➕) — mobile only. */
 .task-center-view .bt-mobile-action-bar {
   display: none;
 }
@@ -1523,28 +1523,6 @@
     box-shadow: 0 -2px 6px rgba(0, 0, 0, 0.06);
     z-index: 10;
   }
-  .task-center-view[data-mobile-layout="true"] .bt-mobile-trash {
-    flex: 0 0 auto;
-    padding: 6px 14px;
-    border-radius: 8px;
-    background: var(--background-secondary);
-    cursor: pointer;
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    min-height: 44px;
-  }
-  .task-center-view[data-mobile-layout="true"] .bt-mobile-trash.drop-hover {
-    background: var(--background-modifier-error);
-    color: var(--text-on-accent);
-  }
-  .task-center-view[data-mobile-layout="true"] .bt-mobile-trash-icon {
-    font-size: 18px;
-  }
-  .task-center-view[data-mobile-layout="true"] .bt-mobile-trash-label {
-    font-size: 12px;
-    font-weight: 600;
-  }
   .task-center-view[data-mobile-layout="true"] .bt-mobile-add-btn {
     flex: 0 0 auto;
     padding: 6px 14px;
@@ -1554,7 +1532,7 @@
     border: none;
     font-weight: 600;
   }
-  .task-center-view[data-mobile-layout="true"] .bt-mobile-home-btn {
+  .task-center-view[data-mobile-layout="true"] .bt-mobile-unscheduled-btn {
     flex: 1 1 auto;
     min-width: 0;
     padding: 6px 12px;
@@ -1565,7 +1543,7 @@
     font-weight: 600;
   }
 
-  /* Desktop pool trash hidden on mobile — the action bar replaces it. */
+  /* Desktop pool trash hidden on mobile — abandon is swipe / action sheet. */
   .task-center-view[data-mobile-layout="true"] .bt-trash {
     display: none;
   }
@@ -1664,15 +1642,6 @@
     display: inline-flex;
     align-items: center;
     justify-content: center;
-  }
-
-  /* Drag visual: scale up the floating card so the lift is felt on a
-     touchscreen where shadow alone is hard to read. */
-  .task-center-view[data-mobile-layout="true"] .bt-card.dragging,
-  .task-center-view[data-mobile-layout="true"] .bt-subcard.dragging {
-    transform: scale(1.04);
-    transform-origin: center;
-    opacity: 0.9;
   }
 
   /* `+N` chip on subcards with deeper subtrees (US-505). Tap → bottom
@@ -1785,16 +1754,6 @@
     text-indent: -9999px;
     overflow: hidden;
   }
-
-/* Reduced-motion drop for the mobile drag scale (Reviewer nit: combined
-   media query — easier on older Chromium / non-nesting CSS pipelines
-   than `@media` nested inside `@media`). */
-@media (prefers-reduced-motion: reduce) {
-  .task-center-view[data-mobile-layout="true"] .bt-card.dragging,
-  .task-center-view[data-mobile-layout="true"] .bt-subcard.dragging {
-    transform: none;
-  }
-}
 
 /* ───── Bottom sheet primitive (used by US-504 day list, M-3 long-press) ───── */
 .modal-container.task-center-bottom-sheet,
@@ -1912,42 +1871,6 @@
 
 .task-center-bottom-sheet .bt-mobile-filter-sheet .bt-filter-popover-wrap {
   width: 100%;
-}
-
-/* ============================================================================
- * Mobile drag (US-507) — floating clone follows the pointer; the original
- * card stays put (slightly muted via .dragging) so the user can see where
- * the card came from.
- * ============================================================================ */
-.bt-mobile-drag-clone {
-  /* Position is set inline (transform: translate(...)) by the controller. */
-  opacity: 0.85;
-  box-shadow: var(--shadow-l);
-  border-radius: 6px;
-  /* Touch should never interact with the clone; controller already sets
-   * pointer-events: none inline, this is belt-and-suspenders for paths
-   * that strip inline styles. */
-  pointer-events: none;
-  /* Keep the clone visually contained — too tall a clone is awkward when
-   * it overlays half the screen. */
-  max-height: 60vh;
-  overflow: hidden;
-}
-
-/* Visual hover paint applied by MobileDragController.paintHover. Same
- * underlying CSS variables as desktop drop-hover so the feel is consistent. */
-.task-center-view [data-tc-drop-hover="true"] {
-  outline: 2px solid var(--interactive-accent);
-  outline-offset: -2px;
-  background: var(--background-modifier-hover);
-}
-.task-center-view [data-task-id][data-tc-drop-hover="true"] {
-  /* Card-as-nest-target: stronger highlight than a column */
-  outline-color: var(--color-green);
-}
-.task-center-view [data-drop-zone="abandon"][data-tc-drop-hover="true"] {
-  outline-color: var(--color-red);
-  background: var(--background-modifier-error-hover, var(--background-modifier-hover));
 }
 
 /* ============================================================================
@@ -2257,16 +2180,4 @@
 
 .tc-input-invalid {
   border-color: var(--color-red);
-}
-
-.tc-mobile-drag-clone {
-  position: fixed;
-  left: 0;
-  top: 0;
-  pointer-events: none;
-  z-index: 9999;
-}
-
-.tc-hidden {
-  display: none !important;
 }

@@ -3,8 +3,8 @@
  *
  * Mobile users should not have to discover desktop-only commands before
  * Task Center feels usable. The mobile layout must expose a thumb-reachable
- * Task Center return/home button, a Quick Add entry, and a first-use empty
- * state that does not mention desktop shortcuts.
+ * Unscheduled entry, a Quick Add entry, and a first-use empty state that
+ * does not mention desktop shortcuts.
  */
 import { browser, expect, $ } from "@wdio/globals";
 import { obsidianPage } from "wdio-obsidian-service";
@@ -56,8 +56,9 @@ describe("Task Center — mobile explicit entry points (US-711)", function () {
 
     const mobileEntry = $("[data-mobile-entry='true']");
     await expect(mobileEntry).toExist();
-    await expect($("[data-mobile-action='open-task-center']")).toExist();
+    await expect($("[data-mobile-action='open-unscheduled']")).toExist();
     await expect($("[data-mobile-action='quick-add']")).toExist();
+    await expect($(".bt-mobile-trash[data-drop-zone='abandon']")).not.toExist();
 
     await $("[data-mobile-action='quick-add']").click();
     await $(".task-center-bottom-sheet").waitForExist({
@@ -70,11 +71,10 @@ describe("Task Center — mobile explicit entry points (US-711)", function () {
 
     await $("[data-tab='week']").click();
     await $('[data-tab="week"].active').waitForExist({ timeout: 3000 });
-    await $("[data-mobile-action='open-task-center']").click();
-    await $('[data-tab="today"].active').waitForExist({
+    await $("[data-mobile-action='open-unscheduled']").click();
+    await $('[data-tab="unscheduled"].active').waitForExist({
       timeout: 3000,
-      timeoutMsg: "US-711: mobile Task Center entry did not return to Today",
+      timeoutMsg: "US-711: mobile Unscheduled entry did not open Unscheduled",
     });
-    await expect($(".bt-onboarding[data-mobile-empty-state='true']")).toExist();
   });
 });
