@@ -50,6 +50,13 @@ async function compile() {
                     addCommand(command) { this._commands.push(command); }
                     addSettingTab(tab) { this._settingsTabs.push(tab); }
                     addStatusBarItem() { return { empty() {}, remove() {}, createSpan() { return this; }, setText() {}, addClass() {}, setAttr() {} }; }
+                    registerCliHandler(command, description, flags, handler) {
+                      this.app.__cliHandlers ??= new Map();
+                      if (this.app.__cliHandlers.has(command)) {
+                        throw new Error('Command "' + command + '" is already registered as a handler.');
+                      }
+                      this.app.__cliHandlers.set(command, { description, flags, handler });
+                    }
                     registerView(type, creator) {
                       this.app.__viewCreators ??= new Map();
                       if (this.app.__viewCreators.has(type)) {
@@ -58,7 +65,7 @@ async function compile() {
                       this.app.__viewCreators.set(type, creator);
                     }
                   }
-                  export class Notice { constructor() {} }
+                  export class Notice { constructor(message) { globalThis.__taskCenterNotices?.push(message); } }
                   export class WorkspaceLeaf {}
                 `);
               case "./types":
@@ -112,6 +119,7 @@ async function compile() {
 function makeAppWithExistingTaskCenterView() {
   const app = {
     __viewCreators: new Map([["task-center-board", () => ({})]]),
+    __cliHandlers: new Map(),
     workspace: {
       onLayoutReady(callback) {
         app.__layoutCallbacks.push(callback);
@@ -128,6 +136,12 @@ function makeAppWithExistingTaskCenterView() {
   return app;
 }
 
+function makeAppWithExistingRegistrations() {
+  const app = makeAppWithExistingTaskCenterView();
+  app.__cliHandlers.set("task-center:list", {});
+  return app;
+}
+
 test("plugin onload tolerates a stale task-center-board view registration", async () => {
   await compile();
   const { default: TaskCenterPlugin } = await import(`../${compiledPath}?t=${Date.now()}`);
@@ -139,4 +153,36 @@ test("plugin onload tolerates a stale task-center-board view registration", asyn
     /Attempting to register an existing view type "task-center-board"/,
   );
   assert.ok(plugin.api, "plugin should keep loading the GUI/API after a stale view registration");
+});
+
+test("plugin onload tolerates stale native CLI handlers from a prior reload", async () => {
+  await compile();
+  const { default: TaskCenterPlugin } = await import(`../${compiledPath}?t=${Date.now()}`);
+  const app = makeAppWithExistingRegistrations();
+  const plugin = new TaskCenterPlugin(app);
+  const errors = [];
+  const originalError = console.error;
+  globalThis.__taskCenterNotices = [];
+  console.error = (...args) => errors.push(args);
+
+  try {
+    await assert.doesNotReject(
+      () => plugin.onload(),
+      /Command "task-center:list" is already registered as a handler/,
+    );
+    assert.ok(plugin.api, "plugin should keep loading after stale CLI handlers");
+    assert.deepEqual(
+      errors,
+      [],
+      "stale CLI handlers from a prior reload should not be reported as a plugin CLI failure",
+    );
+    assert.deepEqual(
+      globalThis.__taskCenterNotices,
+      [],
+      "stale CLI handlers from a prior reload should not show an end-user failure notice",
+    );
+  } finally {
+    console.error = originalError;
+    delete globalThis.__taskCenterNotices;
+  }
 });
