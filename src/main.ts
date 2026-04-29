@@ -27,6 +27,11 @@ import { __setTestForceMobile } from "./platform";
 // as the literal string "true".
 type CliArgs = CliData;
 
+function isExistingViewTypeError(error: unknown, type: string): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return message.includes(`register an existing view type "${type}"`);
+}
+
 export default class TaskCenterPlugin extends Plugin {
   settings!: TaskCenterSettings;
   api!: TaskCenterApi;
@@ -41,7 +46,7 @@ export default class TaskCenterPlugin extends Plugin {
     this.api = new TaskCenterApi(this.app, this.cache);
 
     // View
-    this.registerView(VIEW_TYPE_TASK_CENTER, (leaf) => new TaskCenterView(leaf, this));
+    this.registerTaskCenterView();
     this.addRibbonIcon("kanban-square", tr("ribbon.open"), () => this.activateView());
 
     // Commands (Obsidian command palette). Default hotkey Cmd/Ctrl+Shift+T is
@@ -138,6 +143,40 @@ export default class TaskCenterPlugin extends Plugin {
     this.depHealth?.dispose();
     this.depHealth = null;
     this.cache?.dispose();
+  }
+
+  private registerTaskCenterView(): void {
+    const creator = (leaf: WorkspaceLeaf) => new TaskCenterView(leaf, this);
+    try {
+      this.registerView(VIEW_TYPE_TASK_CENTER, creator);
+      return;
+    } catch (e) {
+      if (!isExistingViewTypeError(e, VIEW_TYPE_TASK_CENTER)) throw e;
+
+      const workspace = this.app.workspace as unknown as {
+        unregisterView?: (type: string) => void;
+      };
+      if (typeof workspace.unregisterView === "function") {
+        try {
+          workspace.unregisterView(VIEW_TYPE_TASK_CENTER);
+          this.registerView(VIEW_TYPE_TASK_CENTER, creator);
+          console.warn(
+            `[task-center] Replaced stale view registration: ${VIEW_TYPE_TASK_CENTER}`,
+          );
+          return;
+        } catch (retryError) {
+          if (!isExistingViewTypeError(retryError, VIEW_TYPE_TASK_CENTER)) {
+            throw retryError;
+          }
+        }
+      }
+
+      // Obsidian can leave the view type registered during hot-reload / failed
+      // reload cycles. Keep the rest of the plugin alive instead of aborting.
+      console.warn(
+        `[task-center] View type already registered; continuing: ${VIEW_TYPE_TASK_CENTER}`,
+      );
+    }
   }
 
   /**
