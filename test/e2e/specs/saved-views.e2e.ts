@@ -290,6 +290,13 @@ describe("US-724 saved views / custom filters", function () {
     await $('[data-saved-views]').waitForExist({ timeout: 5000 });
     await $('[data-saved-view-filter="tag"]').click();
 
+    const spacing = await browser.execute(() => {
+      const list = document.querySelector<HTMLElement>(".bt-tag-options");
+      if (!list) return { rowGap: 0 };
+      return { rowGap: Number.parseFloat(getComputedStyle(list).rowGap) || 0 };
+    });
+    expect(spacing.rowGap).toBeGreaterThanOrEqual(4);
+
     const options = await browser.execute(() =>
       Array.from(document.querySelectorAll("[data-tag-option]")).map((el) => ({
         value: (el as HTMLElement).dataset.tagOption,
