@@ -32,6 +32,11 @@ function isExistingViewTypeError(error: unknown, type: string): boolean {
   return message.includes(`register an existing view type "${type}"`);
 }
 
+function isExistingCliHandlerError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return message.includes("already registered as a handler");
+}
+
 export default class TaskCenterPlugin extends Plugin {
   settings!: TaskCenterSettings;
   api!: TaskCenterApi;
@@ -88,13 +93,18 @@ export default class TaskCenterPlugin extends Plugin {
       try {
         this.registerAllCliHandlers();
       } catch (e) {
-        // A collision with another plugin registering the same verb is a soft
-        // failure — the GUI remains fully usable without the shell CLI.
-        console.error("[task-center] CLI registration failed:", e);
-        new Notice(
-          "Task Center: CLI verbs failed to register (likely a namespace collision). GUI still works.",
-          6000,
-        );
+        // BRAT / hot-reload can leave native CLI handlers registered from the
+        // previous plugin instance. Treat that as a reload residue, not as a
+        // user-visible plugin failure.
+        if (!isExistingCliHandlerError(e)) {
+          // A collision with another plugin registering the same verb is a soft
+          // failure — the GUI remains fully usable without the shell CLI.
+          console.error("[task-center] CLI registration failed:", e);
+          new Notice(
+            "Task Center: CLI verbs failed to register (likely a namespace collision). GUI still works.",
+            6000,
+          );
+        }
       }
     } else {
       console.warn(
@@ -160,9 +170,6 @@ export default class TaskCenterPlugin extends Plugin {
         try {
           workspace.unregisterView(VIEW_TYPE_TASK_CENTER);
           this.registerView(VIEW_TYPE_TASK_CENTER, creator);
-          console.warn(
-            `[task-center] Replaced stale view registration: ${VIEW_TYPE_TASK_CENTER}`,
-          );
           return;
         } catch (retryError) {
           if (!isExistingViewTypeError(retryError, VIEW_TYPE_TASK_CENTER)) {
@@ -173,9 +180,7 @@ export default class TaskCenterPlugin extends Plugin {
 
       // Obsidian can leave the view type registered during hot-reload / failed
       // reload cycles. Keep the rest of the plugin alive instead of aborting.
-      console.warn(
-        `[task-center] View type already registered; continuing: ${VIEW_TYPE_TASK_CENTER}`,
-      );
+      return;
     }
   }
 

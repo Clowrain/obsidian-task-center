@@ -147,12 +147,24 @@ test("plugin onload tolerates a stale task-center-board view registration", asyn
   const { default: TaskCenterPlugin } = await import(`../${compiledPath}?t=${Date.now()}`);
   const app = makeAppWithExistingTaskCenterView();
   const plugin = new TaskCenterPlugin(app);
+  const warnings = [];
+  const originalWarn = console.warn;
+  console.warn = (...args) => warnings.push(args);
 
-  await assert.doesNotReject(
-    () => plugin.onload(),
-    /Attempting to register an existing view type "task-center-board"/,
-  );
-  assert.ok(plugin.api, "plugin should keep loading the GUI/API after a stale view registration");
+  try {
+    await assert.doesNotReject(
+      () => plugin.onload(),
+      /Attempting to register an existing view type "task-center-board"/,
+    );
+    assert.ok(plugin.api, "plugin should keep loading the GUI/API after a stale view registration");
+    assert.deepEqual(
+      warnings,
+      [],
+      "stale view registrations from a prior reload should not warn in the console",
+    );
+  } finally {
+    console.warn = originalWarn;
+  }
 });
 
 test("plugin onload tolerates stale native CLI handlers from a prior reload", async () => {
@@ -161,9 +173,12 @@ test("plugin onload tolerates stale native CLI handlers from a prior reload", as
   const app = makeAppWithExistingRegistrations();
   const plugin = new TaskCenterPlugin(app);
   const errors = [];
+  const warnings = [];
   const originalError = console.error;
+  const originalWarn = console.warn;
   globalThis.__taskCenterNotices = [];
   console.error = (...args) => errors.push(args);
+  console.warn = (...args) => warnings.push(args);
 
   try {
     await assert.doesNotReject(
@@ -181,8 +196,14 @@ test("plugin onload tolerates stale native CLI handlers from a prior reload", as
       [],
       "stale CLI handlers from a prior reload should not show an end-user failure notice",
     );
+    assert.deepEqual(
+      warnings,
+      [],
+      "stale CLI handlers from a prior reload should not warn in the console",
+    );
   } finally {
     console.error = originalError;
+    console.warn = originalWarn;
     delete globalThis.__taskCenterNotices;
   }
 });
