@@ -174,7 +174,7 @@ describe("US-724 saved views / custom filters", function () {
       const popover = document.querySelector<HTMLElement>(".bt-status-popover");
       return Math.round(popover?.getBoundingClientRect().width ?? 0);
     });
-    expect(statusPopoverWidth).toBeLessThanOrEqual(150);
+    expect(statusPopoverWidth).toBeLessThanOrEqual(112);
     await fs.writeFile("/tmp/task-center-status-popover-compact.png", Buffer.from(await browser.takeScreenshot(), "base64"));
     const statusOptions = await browser.execute(() =>
       Array.from(document.querySelectorAll("[data-status-option]")).map((el) => ({
