@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## 0.7.5 — 2026-04-29
+
+- Saved-view filters: close open popovers on outside click, add spacing between tag rows, and tighten status/date popover sizing so compact dialogs do not leave large empty areas.
+- Mobile: replace touch drag/drop with explicit Unscheduled and Quick Add entries; task abandon stays available through swipe/action flows instead of a mobile drop target.
+
 ## 0.7.1 — 2026-04-28
 
 - Adjust release description to satisfy Obsidian community-plugin validation.
