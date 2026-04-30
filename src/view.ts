@@ -1,12 +1,9 @@
 import {
-  App,
   ItemView,
   WorkspaceLeaf,
   Menu,
-  Modal,
   Notice,
   Platform,
-  TextComponent,
 } from "obsidian";
 import { ParsedTask, VIEW_TYPE_TASK_CENTER } from "./types";
 import { formatMinutes } from "./parser";
@@ -35,6 +32,8 @@ import { shouldCloseFilterPopoverOnPointerDown } from "./view/filter-popover";
 import { isMobileMode } from "./platform";
 import { openTaskSourceEditShell } from "./view/source-dialog";
 import { weekMinHeightFromViewHeightPx } from "./view/layout";
+import { SavedViewNameModal } from "./view/saved-view-name-modal";
+import type { FilterPopoverKey, TabKey, ViewState } from "./view/state";
 import { taskDisplayTags } from "./tags";
 import { formatDateFilterLabel } from "./date-filter";
 import { taskMatchesTimeToken, timeTokenAppliesToField } from "./time-filter";
@@ -52,29 +51,9 @@ import type { SavedTaskView, SavedViewStatus, TaskStatus } from "./types";
 import type { SavedViewTimeField, SavedViewTimeFilters } from "./types";
 import type TaskCenterPlugin from "./main";
 
-type TabKey = "today" | "week" | "month" | "completed" | "unscheduled";
-type FilterPopoverKey = "view" | "tag" | "status" | "time-more" | `time:${SavedViewTimeField}`;
-
 const PRIMARY_TIME_FIELD: SavedViewTimeField = "scheduled";
 const SECONDARY_TIME_FIELDS: SavedViewTimeField[] = ["deadline", "completed", "created"];
 type FilterControlsRerender = () => void;
-
-interface ViewState {
-  tab: TabKey;
-  anchorISO: string; // For week/month nav
-  selectedTaskId: string | null;
-  filter: string;
-  savedViewId: string | null;
-  savedViewTag: string;
-  savedViewTime: SavedViewTimeFilters;
-  savedViewStatus: SavedViewStatus;
-  showUnscheduledPool: boolean;
-  collapsedWeeks: Set<string>; // Week-start ISO → collapsed in completed view
-  // Mobile week view: each day-row collapses by default; today is open and
-  // tapping a day's head adds its ISO to this set to expand. Desktop ignores
-  // this — CSS forces the list visible regardless of the class.
-  expandedDays: Set<string>;
-}
 
 // `UndoOp` and `UndoEntry` re-exported from `./view/undo` (the canonical
 // definitions). Local re-export so existing usage in this file compiles.
@@ -2938,69 +2917,6 @@ function statusIcon(s: string): string {
   if (s === "dropped") return "✕";
   if (s === "in_progress") return "◐";
   return "○";
-}
-
-class SavedViewNameModal extends Modal {
-  private value: string;
-  private resolved = false;
-  private resolve: (name: string | null) => void;
-
-  constructor(app: App, initialValue: string, resolve: (name: string | null) => void) {
-    super(app);
-    this.value = initialValue;
-    this.resolve = resolve;
-  }
-
-  onOpen(): void {
-    const { contentEl } = this;
-    contentEl.empty();
-    contentEl.addClass("task-center-saved-view-name-modal");
-    contentEl.createEl("h3", { text: tr("savedViews.promptName") });
-
-    const input = new TextComponent(contentEl);
-    input.inputEl.dataset.savedViewNameInput = "true";
-    input.inputEl.addClass("tc-full-width-input");
-    input.setValue(this.value);
-    input.onChange((value) => (this.value = value));
-    input.inputEl.addEventListener("keydown", (event) => {
-      if (event.key === "Enter" && !event.isComposing) {
-        event.preventDefault();
-        this.commit();
-      } else if (event.key === "Escape") {
-        event.preventDefault();
-        this.close();
-      }
-    });
-
-    const actions = contentEl.createDiv({ cls: "task-center-saved-view-name-actions" });
-    const cancel = actions.createEl("button", { text: tr("savedViews.cancel") });
-    cancel.dataset.action = "cancel-saved-view-name";
-    cancel.addEventListener("click", () => this.close());
-    const save = actions.createEl("button", { text: tr("savedViews.confirmSave"), cls: "mod-cta" });
-    save.dataset.action = "confirm-saved-view-name";
-    save.addEventListener("click", () => this.commit());
-
-    window.setTimeout(() => {
-      input.inputEl.focus();
-      input.inputEl.select();
-    }, 10);
-  }
-
-  onClose(): void {
-    this.contentEl.empty();
-    if (!this.resolved) {
-      this.resolved = true;
-      this.resolve(null);
-    }
-  }
-
-  private commit(): void {
-    const name = this.value.trim();
-    if (!name) return;
-    this.resolved = true;
-    this.resolve(name);
-    this.close();
-  }
 }
 
 function compactPath(p: string): string {
