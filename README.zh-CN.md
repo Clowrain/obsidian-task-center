@@ -13,7 +13,7 @@ Task Center 是一个 Obsidian 插件：在 Obsidian Tasks markdown 之上，增
 - [-] 放弃旧方案 ❌ 2026-04-28
 ```
 
-https://github.com/user-attachments/assets/5502f9f1-59b0-421d-8b21-2dcf1441a222
+https://github.com/user-attachments/assets/30ae1710-402c-4fe8-8df1-333459412ae6
 
 ![Month view](screenshots/month.png)
 
