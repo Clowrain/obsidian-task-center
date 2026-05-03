@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { access, readFile } from "node:fs/promises";
+import { execFileSync } from "node:child_process";
+import { readFile } from "node:fs/promises";
 
 async function readJson(path) {
   return JSON.parse(await readFile(path, "utf8"));
@@ -29,14 +30,14 @@ test("release metadata is ready for Obsidian community plugin submission", async
 });
 
 test("local plugin settings are not published as release defaults", async () => {
-  await assert.rejects(
-    () => access("data.json"),
-    { code: "ENOENT" },
-    "data.json is per-vault plugin state and must not be committed",
-  );
-
   const gitignore = await readFile(".gitignore", "utf8");
   assert.match(gitignore, /^data\.json$/m);
+
+  assert.throws(
+    () => execFileSync("git", ["ls-files", "--error-unmatch", "data.json"], { stdio: "pipe" }),
+    /did not match any file\(s\) known to git/,
+    "data.json is per-vault plugin state and must never be tracked in git",
+  );
 });
 
 test("local lint gate mirrors Obsidian review bot required rules", async () => {

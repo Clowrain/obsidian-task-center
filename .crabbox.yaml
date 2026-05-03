@@ -1,0 +1,10 @@
+profile: task-center-check
+provider: blacksmith-testbox
+
+blacksmith:
+  # If your Blacksmith account requires an explicit org selection,
+  # set CRABBOX_BLACKSMITH_ORG in your shell before warming a box.
+  workflow: .github/workflows/blacksmith-testbox.yml
+  job: hydrate
+  ref: main
+  idleTimeout: 90m

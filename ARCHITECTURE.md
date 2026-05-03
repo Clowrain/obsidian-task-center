@@ -18,10 +18,71 @@
 4. **写永远是字节级 + 原子**。不读了改、改了写，统一走 `app.vault.process(file, mutate)`，让 Obsidian 自己保证原子性；不写半个文件。（US-403 / UX §6.7）
 5. **未识别 token 字节级保留**。任何 mutate 的输入是文件原始那一行，输出仍是同一行的最小修改版；emoji / inline field / block anchor / 优先级符号都按字节顺序保留。（US-407 / UX §6.5）
 6. **CLI 与 GUI 走同一份业务逻辑**。CLI = thin wrapper over `TaskCenterApi`；GUI 也只调 `TaskCenterApi`。两边的"列表"、"渲染子任务"等共享规则，不各自发明一套。
+7. **Query 是声明式 DSL，对应一等数据模型**。筛选栏、view 选择器、summary 配置器、预设 tab、用户保存 tab 都在编辑同一份 query 对象；不允许“工具条临时状态一套、已保存 preset 另一套”的双轨模型。（US-109t / US-109p1）
+   - UI 命名也必须服从这个对象模型：打开整份 query 编辑器的入口叫“编辑 Query”或等价对象名；只有真的只改 `filters` / `view` / `summary` 某一个分区时，才允许直接用分区名命名。（US-109p5）
+8. **没有独立持久化的“current query”对象**。运行时只存在“当前激活 tab 的 saved preset”与“挂在该 tab 上的 draft override”；渲染读取的是两者合成后的 effective query。任何想表达“回到当前 query”的地方，实际含义都必须是“回到当前 tab 的已保存版本”。（US-109u / US-109s1）
 
 ---
 
 ## 1. 数据模型
+
+### 1.0 `QueryPreset` —— 顶部 tab / 保存配置 / 预设 tab 的统一模型
+
+```ts
+type QueryViewType = "list" | "week" | "month" | "matrix";
+
+interface QueryFilters {
+  search?: string;
+  tags?: string[];                 // AND 语义；普通 markdown tag
+  status?: "all" | TaskStatus[];   // 新写入以数组为主；兼容旧单值
+  time?: {
+    scheduled?: string;
+    deadline?: string;
+    completed?: string;
+    abandoned?: string;
+    created?: string;
+  };
+}
+
+interface QueryViewConfig {
+  type: QueryViewType;
+  preset?: string;                 // 例如 "today"；只是 preset 名，不是新 view type
+  sections?: unknown[];
+  axis?: unknown[];
+  buckets?: unknown[];
+  orderBy?: string[];
+}
+
+interface QuerySummaryMetric {
+  type: "count" | "sum" | "ratio" | "top_n" | "group_by";
+  field?: string;
+  numerator?: string;
+  denominator?: string;
+  by?: string;
+  limit?: number;
+  format?: string;
+}
+
+interface QueryPreset {
+  id: string;            // 稳定 id，默认 tab / 最近 tab / 快捷键都引用它
+  name: string;          // 可显示名称，允许任意语言与符号
+  builtin?: boolean;     // 是否系统预设
+  hidden?: boolean;
+  filters: QueryFilters;
+  view: QueryViewConfig;
+  summary: QuerySummaryMetric[];
+}
+```
+
+**关键边界**：
+
+- `filters` / `view` / `summary` 是同一份 DSL 的三个分区。
+- 今日、本周、本月、TODO、未排期、已完成、已放弃都只是 `QueryPreset` 实例，不是额外 view 类型。
+- `summary` 目前是声明式 metric 列表，不是任意脚本语言；只有当未来主区变成“纯报表 surface”时，才新增新的 `view.type`，而不是把现有 summary 强行塞进 view。
+- 存储层短期可继续沿用旧字段名（如 `savedViews`）以兼容已有 `data.json`，但语义上它承载的是 query preset；新代码与新文档都不应再把它理解为“只保存 filter 的 view”。
+- 若要表达未保存改动，应该增加 `draftByTabId[tabId]` 或等价结构，而不是落一个新的 `currentQuery` 持久字段。
+- `update/save-as/discard` 都是对“当前激活 tab + 其 draft”的操作，不是设置页上的另一套持久化流程：`update(tabId)` 覆盖当前 tab preset，`saveAs(newId)` 复制当前 effective query 生成新 tab，`discardDraft(tabId)` 丢弃该 tab 的 draft 并回到已保存版本。
+- GUI 的可视化编辑器、GUI 的 DSL 直编入口、CLI 的 query-preset 管理动词必须共用同一份 `QueryPreset` schema、同一套 normalize/validate 逻辑；不能各自维护一套解析器。
 
 ### 1.1 `ParsedTask` —— 一行任务的全部派生信息
 
@@ -209,9 +270,9 @@ Task card click
 - `view.ts` 只负责把卡片 click 事件路由到 `openSourceDialog(task)`，并阻止按钮 / drag / contextmenu 冒泡误触发；不得继续给卡片绑定 `dblclick → openAtSource`。
 - 测试以 e2e 为主：点击卡片后断言 source edit shell 出现、真实 Markdown editor 内容包含源文件上下文、当前任务行居中或至少 cursor line 正确、修改子任务后 vault 文件变更并刷新卡片。
 
-### 2.3 今日执行视图（US-720）
+### 2.3 今日预设 Query（US-720）
 
-今日视图是 `TaskCenterView` 的一个轻量聚合 tab，不引入新数据模型，也不创建“今日计划”持久状态。
+今日不是新的通用 view 类型，而是一个 `QueryPreset`：`filters.status=[todo]` + `view.type=list` + `view.preset=today`。现有 DOM / e2e 兼容层可以保留 `data-view="today"`，但实现语义上它是 list preset，不引入第二套 view 抽象，也不创建“今日计划”持久状态。
 
 ```
 cache.flatten()
@@ -222,9 +283,33 @@ cache.flatten()
   → render capped groups (max 3 each)
 ```
 
+对应 DSL 形态：
+
+```yaml
+id: preset-today
+name: 今日
+filters:
+  status: [todo]
+view:
+  type: list
+  preset: today
+  sections:
+    - id: overdue
+      when: deadline < today
+      limit: 3
+    - id: today
+      when: scheduled == today
+      limit: 3
+    - id: unscheduled-rec
+      when: scheduled is empty
+      order_by: [deadline_risk, created_desc]
+      limit: 3
+summary: []
+```
+
 **硬约束**：
 
-- `data-tab="today"` 与 `data-view="today"` 是入口和容器合同（US-720a）。
+- `data-tab="today"` 是入口合同；`data-view="today"` 当前作为兼容容器合同保留，但语义必须等价于 `view.type=list + preset=today`（US-720a）。
 - 三组使用 `data-today-group="overdue|today|unscheduled-rec"`；组内渲染最多 3 张卡，防止第一屏退化成普通 backlog（US-720b）。
 - `data-action="reschedule-tomorrow"` 必须调用现有 `TaskCenterApi.schedule()` / `writer.setScheduled()` 路径，不能在 view 中手写 markdown 替换（US-720c）。
 - 三组全空时渲染 `data-today-empty`；CSS 负责视觉居中和有任务时的顶部留白（US-720d / US-720e）。
@@ -390,6 +475,15 @@ Obsidian callout 里的任务行形如 `> - [ ] task` 或多层 `>>>  - [ ] task
 ---
 
 ## 5. CLI 调度
+
+除了 task 动词，CLI 还应暴露 query-preset 管理动词。它们是对 `QueryPreset` 存储层的 CRUD 和元数据操作，不直接触碰 markdown 任务：
+
+- `query-list` / 等价动词：列出 preset id、名称、可见性、默认标记
+- `query-show <id>`：输出该 preset 的 DSL
+- `query-save` / `query-update`：从 stdin / 文件 / 参数读取 DSL 并创建或覆盖 preset
+- `query-rename` / `query-copy` / `query-hide` / `query-delete` / `query-set-default`
+
+这些动词与 GUI 的“保存为 tab / 更新当前 tab / 重命名 / 复制 / 隐藏 / 删除 / 设为默认”语义必须完全一致。
 
 ### 5.1 入口契约
 
@@ -720,12 +814,12 @@ i18n/
 ### 9.4 应用层不硬编码 tag / 字段名（US-108 / US-301）
 
 - tag 是普通用户数据，来自 markdown 现状。应用不提供单独的 tag 分类设置，也不内置 `#1象限`、`#now` 这类业务分类。
-- 保存视图切换、tag 筛选、时间筛选、状态筛选都用自绘 button + popover，不使用原生 select / 原生 multiple select。tag 筛选用当前候选集合里实际存在的合法 tag 生成“标签”按钮 + popover（搜索框 + 自绘 checkbox 行）；按钮自己显示选中摘要（首个 tag + `+N`），不在工具条旁边额外铺 selected chips。时间筛选存为 `SavedViewTimeFilters = { scheduled?, deadline?, completed?, created? }`，不再存在无语义 `date` 字段。顶栏直接显示 `scheduled`（排期）范围 popover；`deadline / completed / created` 进入“更多时间”，第一层只显示字段行和当前摘要，第二层复用同一套月历范围选择器。排期筛选不得 fallback 到 `📅 deadline` / `✅ completed` / `➕ created`，`deadline` 的 `overdue / next-7-days` 是 deadline 自己的 token，不进入 scheduled。状态筛选是固定枚举 popover，触发按钮的“状态”和选项里的“全部”分开文案；`SavedViewStatus` 兼容旧的单值字符串，但新保存的待办 / 完成 / 放弃多选写成状态数组，`all` 表示不按状态过滤。常用 tag / time / 状态 / 搜索组合通过“保存过滤视图”新建 preset，通过“更新”覆盖当前 preset。筛选控件变化不清空 `savedViewId`，只有用户选择“无过滤”才清空；空筛选集合不能保存或更新成 preset。
+- query preset 切换、tag 筛选、时间筛选、状态筛选都用自绘 button + popover，不使用原生 select / 原生 multiple select。tag 筛选用当前候选集合里实际存在的合法 tag 生成“标签”按钮 + popover（搜索框 + 自绘 checkbox 行）；按钮自己显示选中摘要（首个 tag + `+N`），不在工具条旁边额外铺 selected chips。时间筛选存为 `QueryFilters.time = { scheduled?, deadline?, completed?, abandoned?, created? }`，不再存在无语义 `date` 字段。顶栏直接显示 `scheduled`（排期）范围 popover；`deadline / completed / created` 进入“更多时间”，第一层只显示字段行和当前摘要，第二层复用同一套月历范围选择器。排期筛选不得 fallback 到 `📅 deadline` / `✅ completed` / `➕ created`，`deadline` 的 `overdue / next-7-days` 是 deadline 自己的 token，不进入 scheduled。状态筛选是固定枚举 popover，触发按钮的“状态”和选项里的“全部”分开文案；状态值兼容旧的单值字符串，但新保存的待办 / 完成 / 放弃多选写成状态数组，`all` 表示不按状态过滤。常用 tag / time / 状态 / 搜索组合通过“保存为 query tab”新建 preset，通过“更新”覆盖当前 preset。筛选控件变化不清空当前 preset id，只有用户选择“无过滤”才清空；空筛选集合不能保存或更新成 preset。
 - 右键菜单只提供通用 tag 编辑能力：追加 / 移除 markdown 里的普通 tag，不做互斥分组替换。
-- 未排期视图不按内置分组渲染；排序按 US-104，用户要看某类 tag 时通过筛选或保存视图进入。保存视图不写入独立“分组”条件。
+- 未排期视图不按内置分组渲染；排序按 US-104，用户要看某类 tag 时通过筛选或保存 query tab 进入。query preset 不写入独立“分组”条件。
 - "时长"字段名同理：summary / 卡片 meta 行从用户配置的字段名读取；`estimate` / `actual` 只能作为默认 preset 示例，不是业务分支。
 
-> 实现细节都在 markdown 解析结果 + filterTasks/computeStats + saved views，没有任何 `if (tag === "#1象限")` 的特判路径。CI 可以 grep 拦截业务路径中的示例 tag / 示例 inline-field 字面；写在文档示例、测试 fixture、parser 字段名常量、设置默认值里允许，写在视图特殊分支里禁止。
+> 实现细节都在 markdown 解析结果 + query preset DSL + filterTasks/computeStats 中，没有任何 `if (tag === "#1象限")` 的特判路径。CI 可以 grep 拦截业务路径中的示例 tag / 示例 inline-field 字面；写在文档示例、测试 fixture、parser 字段名常量、设置默认值里允许，写在视图特殊分支里禁止。
 
 ---
 

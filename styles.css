@@ -33,6 +33,32 @@
   align-items: center;
   gap: 8px;
 }
+.task-center-view .bt-tab-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.task-center-view .bt-tab-name {
+  white-space: nowrap;
+}
+.task-center-view .bt-tab-dirty-dot {
+  color: var(--interactive-accent);
+  font-size: 14px;
+  line-height: 1;
+}
+.task-center-view .bt-tab-menu-btn {
+  padding: 0 4px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-faint);
+  cursor: pointer;
+}
+.task-center-view .bt-tab-menu-btn:hover {
+  background: var(--background-modifier-hover);
+  color: var(--text-normal);
+}
 .task-center-view .bt-tab:hover {
   color: var(--text-normal);
   background: var(--background-modifier-hover);
@@ -92,10 +118,22 @@
 
 .task-center-view .bt-toolbar {
   display: flex;
-  align-items: center;
-  gap: 6px;
-  flex-wrap: wrap;
+  flex-direction: column;
+  gap: 8px;
   padding: 6px 2px 8px;
+}
+.task-center-view .bt-toolbar-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  flex-wrap: wrap;
+}
+.task-center-view .bt-toolbar-main {
+  justify-content: space-between;
+}
+.task-center-view .bt-toolbar-sub {
+  align-items: flex-start;
 }
 .task-center-view .bt-toolbar input,
 .task-center-view .bt-toolbar select,
@@ -128,9 +166,16 @@
 .task-center-view .bt-search {
   flex: 1 1 240px;
   min-width: 200px;
-  max-width: 360px;
+  max-width: 520px;
   padding: 4px 10px;
   font-size: 12px;
+}
+.task-center-view .bt-toolbar-utility {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
 }
 .task-center-view .bt-add-btn {
   padding: 0 14px;
@@ -175,11 +220,32 @@
 }
 .task-center-view .bt-saved-views {
   display: flex;
-  align-items: center;
-  gap: 4px;
-  flex: 1 1 520px;
-  min-width: 320px;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px 12px;
+  flex: 1 1 auto;
+  min-width: 0;
   flex-wrap: wrap;
+}
+.task-center-view .bt-saved-view-filters,
+.task-center-view .bt-saved-view-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.task-center-view .bt-saved-view-filters {
+  flex: 1 1 420px;
+  min-width: 280px;
+}
+.task-center-view .bt-saved-view-actions {
+  flex: 0 0 auto;
+  justify-content: flex-end;
+}
+.task-center-view .bt-list-view {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
 }
 .task-center-view .bt-filter-popover-wrap {
   position: relative;
@@ -730,6 +796,7 @@
 .task-center-view .bt-month {
   display: flex;
   flex-direction: column;
+  width: 100%;
 }
 .task-center-view .bt-month-header {
   display: grid;
@@ -991,18 +1058,19 @@
 /* Pool wrapper: unscheduled + trash side by side */
 .task-center-view .bt-pool-wrap {
   display: grid;
-  grid-template-columns: 1fr 200px;
-  gap: 10px;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 2px;
   margin-top: 12px;
-  align-items: start;
+  align-items: stretch;
 }
 
 /* Abandon drop zone — sticky so it stays visible while scrolling the unscheduled pool */
 .task-center-view .bt-trash {
+  grid-column: 7;
   border: 2px dashed var(--background-modifier-border);
-  border-radius: 6px;
+  border-radius: 8px;
   background: var(--background-secondary);
-  padding: 14px 12px;
+  padding: 18px 12px;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -1011,9 +1079,7 @@
   color: var(--text-muted);
   font-size: 11px;
   transition: border-color 0.15s ease, background-color 0.15s ease, color 0.15s ease;
-  height: 120px;
-  position: sticky;
-  top: 8px;
+  min-height: 116px;
 }
 .task-center-view .bt-trash:hover,
 .task-center-view .bt-trash.drop-hover {
@@ -1051,9 +1117,11 @@
 
 /* Unscheduled pool */
 .task-center-view .bt-unscheduled-pool {
-  padding: 8px;
+  grid-column: 1 / 7;
+  min-width: 0;
+  padding: 10px 12px;
   border: 1px dashed var(--background-modifier-border);
-  border-radius: 6px;
+  border-radius: 8px;
   background: var(--background-secondary);
 }
 .task-center-view .bt-unscheduled-head {
@@ -1073,15 +1141,15 @@
 /* Masonry via CSS columns — cards have variable height so grid leaves gaps.
    column-width lets the browser auto-pick column count based on container. */
 .task-center-view .bt-unscheduled-list {
-  column-width: 200px;
-  column-gap: 6px;
+  column-width: 220px;
+  column-gap: 8px;
   min-height: 30px;
 }
 .task-center-view .bt-unscheduled-list > .bt-card {
   break-inside: avoid;
   display: block;
   width: 100%;
-  margin: 0 0 6px 0;
+  margin: 0 0 8px 0;
 }
 
 .task-center-view .bt-unscheduled-big {
@@ -1554,10 +1622,12 @@
   }
 
   .task-center-view[data-mobile-layout="true"] .bt-toolbar {
+    padding: 4px 0;
+  }
+  .task-center-view[data-mobile-layout="true"] .bt-toolbar-row {
     flex-wrap: nowrap;
     overflow-x: auto;
     max-width: 100%;
-    padding: 4px 0;
     -webkit-overflow-scrolling: touch;
   }
 
@@ -1870,6 +1940,96 @@
 
 .task-center-bottom-sheet .bt-mobile-filter-sheet .bt-filter-popover-wrap {
   width: 100%;
+}
+.task-center-bottom-sheet .bt-query-controls-sheet {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.task-center-bottom-sheet .bt-query-editor-help {
+  color: var(--text-muted);
+  font-size: 13px;
+  line-height: 1.5;
+}
+.task-center-bottom-sheet .bt-query-editor-section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.task-center-bottom-sheet .bt-query-editor-section-title {
+  color: var(--text-faint);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+.task-center-bottom-sheet .bt-query-editor-section-note {
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+.task-center-bottom-sheet .bt-query-controls-sheet .bt-saved-view-filters,
+.task-center-bottom-sheet .bt-query-controls-sheet .bt-saved-view-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.task-center-bottom-sheet .bt-query-controls-sheet .bt-filter-popover-wrap,
+.task-center-bottom-sheet .bt-query-controls-sheet .bt-tag-filter {
+  min-width: 0;
+}
+.task-center-bottom-sheet .bt-query-controls-sheet .bt-saved-view-save,
+.task-center-bottom-sheet .bt-query-controls-sheet .bt-saved-view-filter,
+.task-center-bottom-sheet .bt-query-controls-sheet .bt-tag-filter-trigger {
+  min-height: 34px;
+}
+.task-center-bottom-sheet .bt-manage-tabs-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.task-center-bottom-sheet .bt-manage-tab-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 8px;
+  padding: 10px 0 12px;
+  border-bottom: 1px solid var(--background-modifier-border);
+}
+.task-center-bottom-sheet .bt-manage-tab-main {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.task-center-bottom-sheet .bt-manage-tab-title {
+  font-weight: 600;
+  color: var(--text-normal);
+}
+.task-center-bottom-sheet .bt-manage-tab-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.task-center-bottom-sheet .bt-manage-tab-badge {
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--background-secondary);
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 600;
+}
+.task-center-bottom-sheet .bt-manage-tab-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.task-center-bottom-sheet .bt-manage-tab-btn {
+  min-height: 30px;
+  padding: 6px 10px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 8px;
+  background: var(--background-secondary);
+  color: var(--text-normal);
 }
 
 /* ============================================================================

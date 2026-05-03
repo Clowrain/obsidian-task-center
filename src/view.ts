@@ -33,21 +33,42 @@ import { isMobileMode } from "./platform";
 import { openTaskSourceEditShell } from "./view/source-dialog";
 import { weekMinHeightFromViewHeightPx } from "./view/layout";
 import { SavedViewNameModal } from "./view/saved-view-name-modal";
+import { QueryDslModal, type QueryDslSubmitMode } from "./view/query-dsl-modal";
 import type { FilterPopoverKey, TabKey, ViewState } from "./view/state";
 import { taskDisplayTags } from "./tags";
 import { formatDateFilterLabel } from "./date-filter";
 import { taskMatchesTimeToken, timeTokenAppliesToField } from "./time-filter";
 import {
   applySavedViewFilters,
+  builtinSavedViewId,
+  restoreBuiltinSavedViewById,
+  restoreBuiltinSavedViews,
   clearSavedViewFilters as emptySavedViewFilters,
+  createSavedViewId,
   createSavedView,
+  parseSavedViewDsl,
+  sameSavedViewContent,
+  stringifySavedViewDsl,
   hasSavedViewFilters,
+  duplicateSavedView,
+  moveSavedViewById,
+  renameSavedViewById,
+  setSavedViewHiddenById,
+  deleteSavedViewById,
+  normalizeSavedTaskView,
   normalizeSavedViewStatus,
   suggestSavedViewName as suggestSavedViewNameForFilters,
   upsertSavedView,
   updateSavedViewById,
+  visibleSavedViews,
 } from "./saved-views";
-import type { SavedTaskView, SavedViewStatus, TaskStatus } from "./types";
+import type {
+  SavedTaskView,
+  SavedViewConfig,
+  SavedViewStatus,
+  SavedViewSummaryMetric,
+  TaskStatus,
+} from "./types";
 import type { SavedViewTimeField, SavedViewTimeFilters } from "./types";
 import type TaskCenterPlugin from "./main";
 
@@ -134,9 +155,9 @@ export class TaskCenterView extends ItemView {
   // Cross-tab drag dwell: hovering a card over a tab head for 600ms switches
   // tabs. UX.md §6.1 / ARCHITECTURE.md §11. One tracker for the whole view —
   // tab heads route their dragover events through `update()`.
-  private dwellTracker = new TabDwellTracker<TabKey>({
+  private dwellTracker = new TabDwellTracker<string>({
     durationMs: 600,
-    onCommit: (tab) => this.setTab(tab),
+    onCommit: (id) => this.activateSavedViewById(id),
   });
   // US-128: Ctrl/Cmd+Z undo stack. Only records writes initiated from this
   // view (drag / keyboard / quick-add). CLI writes are not captured —
@@ -148,6 +169,7 @@ export class TaskCenterView extends ItemView {
   private dateCalendarAnchorISO = startOfMonth(todayISO());
   private pendingDateRangeStart: string | null = null;
   private viewResizeObserver: ResizeObserver | null = null;
+  private tabDrafts = new Map<string, SavedTaskView>();
 
   constructor(leaf: WorkspaceLeaf, plugin: TaskCenterPlugin) {
     super(leaf);
@@ -157,16 +179,21 @@ export class TaskCenterView extends ItemView {
       onApplied: () => this.scheduleRefresh(),
       notify: (msg, ms) => new Notice(msg, ms),
     });
+    const restoredSavedView = this.initialSavedViewFromSettings();
+    const restoredFilters = restoredSavedView ? applySavedViewFilters(restoredSavedView) : emptySavedViewFilters();
+    const restoredTab = restoredSavedView
+      ? this.tabForSavedView(restoredSavedView, "today")
+      : "today";
     this.state = {
-      // Priority: last-closed tab → defaultView setting → "week"
-      tab: plugin.settings.lastTab ?? plugin.settings.defaultView ?? "week",
+      // Priority: last-saved query preset → default saved query preset → first visible query tab.
+      tab: restoredTab,
       anchorISO: todayISO(),
       selectedTaskId: null,
-      filter: "",
-      savedViewId: null,
-      savedViewTag: "",
-      savedViewTime: {},
-      savedViewStatus: "all",
+      filter: restoredFilters.search,
+      savedViewId: restoredFilters.savedViewId,
+      savedViewTag: restoredFilters.tag,
+      savedViewTime: restoredFilters.time,
+      savedViewStatus: restoredFilters.status,
       showUnscheduledPool: true,
       collapsedWeeks: new Set(),
       expandedDays: new Set(),
@@ -181,6 +208,18 @@ export class TaskCenterView extends ItemView {
   }
   getIcon(): string {
     return "kanban-square";
+  }
+
+  private initialSavedViewFromSettings(): SavedTaskView | null {
+    const preferredId = this.plugin.settings.lastSavedViewId ?? this.plugin.settings.defaultSavedViewId;
+    if (preferredId) {
+      const match = this.plugin.settings.savedViews.find((view) => view.id === preferredId);
+      if (match) {
+        const normalized = normalizeSavedTaskView(match);
+        if (!normalized.hidden) return normalized;
+      }
+    }
+    return visibleSavedViews(this.plugin.settings.savedViews)[0] ?? null;
   }
 
   async onOpen(): Promise<void> {
@@ -409,6 +448,11 @@ export class TaskCenterView extends ItemView {
   // ViewState init (priority: lastTab → defaultView → "week").
   // see USER_STORIES.md
   setTab(tab: TabKey) {
+    const builtIn = this.plugin.settings.savedViews.find((view) => view.id === this.builtinSavedViewIdForTab(tab));
+    if (builtIn) {
+      this.activateSavedView(builtIn);
+      return;
+    }
     this.state.tab = tab;
     this.plugin.settings.lastTab = tab;
     this.plugin.saveSettings().catch(() => undefined);
@@ -456,6 +500,9 @@ export class TaskCenterView extends ItemView {
           break;
         case "unscheduled":
           this.renderUnscheduledBig(body);
+          break;
+        case "list":
+          this.renderList(body);
           break;
       }
     }
@@ -541,77 +588,48 @@ export class TaskCenterView extends ItemView {
 
   private renderTabBar(parent: HTMLElement) {
     const bar = parent.createDiv({ cls: "bt-tabbar" });
-    const today = todayISO();
-    const weekStart = startOfWeek(today, this.plugin.settings.weekStartsOn);
-    const weekEnd = addDays(weekStart, 6);
-    const monthStart = startOfMonth(today);
-    const monthEnd = endOfMonth(today);
-    const activeTodos = this.tasks.filter((t) => t.status === "todo" && !t.inheritsTerminal);
-    // US-105: tab badge must match what the user sees after switching to
-    // the tab. Each tab's body applies `hideChildrenOfVisibleParents` to
-    // collapse children that ride with a visible parent — the badge has
-    // to apply the same dedup or it overcounts (the reported bug:
-    // Unscheduled tab said 15, body showed 1 because 14 children rode
-    // with their parents).
-    // US-720 (task #63): today tab badge counts overdue + today scheduled
-    // todos. Unscheduled-rec is intentionally NOT counted — it's a single
-    // recommendation slot, not a backlog measure.
-    const overdueCount = activeTodos.filter((t) => t.deadline && t.deadline < today).length;
-    const todayScheduled = activeTodos.filter((t) => t.scheduled === today).length;
-    const counts = {
-      today: overdueCount + todayScheduled,
-      week: this.hideChildrenOfVisibleParents(
-        this.tasks.filter((t) => {
-          const date = taskDateColumn(t);
-          return !!date && date >= weekStart && date <= weekEnd;
-        }),
-      ).length,
-      month: this.hideChildrenOfVisibleParents(
-        this.tasks.filter((t) => {
-          const date = taskDateColumn(t);
-          return !!date && date >= monthStart && date <= monthEnd;
-        }),
-      ).length,
-      completed: this.hideChildrenOfVisibleParents(
-        this.tasks.filter((t) => t.status === "done"),
-      ).length,
-      unscheduled: this.hideChildrenOfVisibleParents(
-        activeTodos.filter((t) => !t.scheduled),
-      ).length,
-    };
-    // US-720: Today is positioned first as the entry-point tab. Hotkeys
-    // shifted from ⌃1..⌃4 → ⌃1..⌃5 so each tab still has a number key.
-    const tabs: Array<{ key: TabKey; label: string; hotkey: string; count: number }> = [
-      { key: "today", label: tr("tab.today"), hotkey: "⌃1", count: counts.today },
-      { key: "week", label: tr("tab.week"), hotkey: "⌃2", count: counts.week },
-      { key: "month", label: tr("tab.month"), hotkey: "⌃3", count: counts.month },
-      { key: "completed", label: tr("tab.completed"), hotkey: "⌃4", count: counts.completed },
-      { key: "unscheduled", label: tr("tab.unscheduled"), hotkey: "⌃5", count: counts.unscheduled },
-    ];
-    for (const t of tabs) {
-      const btn = bar.createDiv({ cls: "bt-tab" + (this.state.tab === t.key ? " active" : "") });
-      // Stable e2e selector: `[data-tab="week|month|completed|unscheduled"]`.
-      // The visible label changes (i18n + week-number formatting), so tests
-      // must not depend on text content.
-      btn.dataset.tab = t.key;
-      btn.createSpan({ text: t.label });
-      if (t.count > 0) {
-        btn.createSpan({ text: String(t.count), cls: "bt-tab-count" });
+    const tabs = this.visibleQueryTabs();
+    for (const [index, view] of tabs.entries()) {
+      const active = view.id === this.state.savedViewId;
+      const dirty = this.isSavedViewDirty(view);
+      const badges = this.savedViewBadges(view);
+      const btn = bar.createDiv({ cls: "bt-tab" + (active ? " active" : "") });
+      const legacyTab = this.legacyTabForSavedView(view);
+      if (legacyTab) btn.dataset.tab = legacyTab;
+      btn.dataset.queryTabId = view.id;
+      if (dirty) btn.dataset.queryTabDirty = "true";
+      if (this.plugin.settings.defaultSavedViewId === view.id) btn.dataset.queryTabDefault = "true";
+      btn.title = badges.length > 0 ? `${view.name} · ${badges.join(" · ")}` : view.name;
+      const label = btn.createDiv({ cls: "bt-tab-label" });
+      label.createSpan({ text: view.name, cls: "bt-tab-name" });
+      if (dirty) {
+        label.createSpan({ text: "•", cls: "bt-tab-dirty-dot" });
       }
-      btn.createSpan({ text: t.hotkey, cls: "bt-hotkey" });
-      btn.addEventListener("click", () => this.setTab(t.key));
+      const count = this.countForSavedView(view);
+      if (count > 0) {
+        btn.createSpan({ text: String(count), cls: "bt-tab-count" });
+      }
+      if (index < 9) {
+        btn.createSpan({ text: `⌃${index + 1}`, cls: "bt-hotkey" });
+      }
+      btn.addEventListener("click", () => this.activateSavedView(view));
+      btn.addEventListener("dblclick", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        void this.renameSavedView(view);
+      });
+      btn.addEventListener("contextmenu", (event) => {
+        event.preventDefault();
+        this.openSavedViewMenu(event, view);
+      });
 
-      // Cross-tab drag: hover a card over a tab head for 600ms to switch to
-      // it mid-drag. Tab heads themselves do not accept drops — the user
-      // picks a day within the newly-switched view. Dwell timing is rAF +
-      // performance.now() (drift-free under main-thread stalls; UX.md §6.1).
       btn.addEventListener("dragover", (e) => {
         const dt = e.dataTransfer;
         if (!dt || !dt.types.contains("text/task-id")) return;
         e.preventDefault();
         dt.dropEffect = "move";
         btn.addClass("drag-hover");
-        this.dwellTracker.update(t.key, btn, this.state.tab);
+        this.dwellTracker.update(view.id, btn, this.state.savedViewId ?? "");
       });
       btn.addEventListener("dragleave", () => {
         btn.removeClass("drag-hover");
@@ -622,10 +640,12 @@ export class TaskCenterView extends ItemView {
 
   private renderToolbar(parent: HTMLElement) {
     const bar = parent.createDiv({ cls: "bt-toolbar" });
+    const mainRow = bar.createDiv({ cls: "bt-toolbar-row bt-toolbar-main" });
+    const subRow = isMobileMode() ? mainRow : bar.createDiv({ cls: "bt-toolbar-row bt-toolbar-sub" });
 
     // Navigation arrows for week/month
     if (this.state.tab === "week" || this.state.tab === "month") {
-      const nav = bar.createDiv({ cls: "bt-nav" });
+      const nav = mainRow.createDiv({ cls: "bt-nav" });
       const prev = nav.createEl("button", { text: "◀" });
       // Stable e2e selector — the visible label changes (in week tab the
       // "today" button shows the week number; in month tab it shows
@@ -666,7 +686,7 @@ export class TaskCenterView extends ItemView {
     // tag to narrow the board; CLI exposes the same filter via
     // `task-center:list search=…`.
     // see USER_STORIES.md
-    const search = bar.createEl("input", { type: "text", placeholder: tr("toolbar.filter") });
+    const search = mainRow.createEl("input", { type: "text", placeholder: tr("toolbar.filter") });
     search.addClass("bt-search");
     search.value = this.state.filter;
     // §7.3: debounce search input to avoid full teardown+rebuild per keystroke
@@ -689,27 +709,29 @@ export class TaskCenterView extends ItemView {
     });
 
     if (isMobileMode()) {
-      const mobileFilters = bar.createEl("button", {
-        text: tr("savedViews.mobileEntry"),
+      const mobileFilters = mainRow.createEl("button", {
+        text: tr("savedViews.editQuery"),
         cls: "bt-mobile-filter-btn",
       });
       mobileFilters.dataset.mobileAction = "filters";
-      mobileFilters.addEventListener("click", () => this.openMobileFilterSheet());
+      mobileFilters.addEventListener("click", () => this.openQueryControlsSheet());
     } else {
-      this.renderSavedViewsToolbar(bar);
+      this.renderSavedViewsCompactBar(subRow);
     }
+
+    const utility = mainRow.createDiv({ cls: "bt-toolbar-utility" });
 
     // US-163: toolbar `+` opens Quick Add, which writes the new line to
     // today's daily-note tail (the only entry point — see writer.addTask
     // resolution order). Default scheduled = unset; user adds ⏳ inline
     // via Quick Add tokens or schedules later via drag.
     // see USER_STORIES.md
-    const add = bar.createEl("button", { text: tr("toolbar.add") });
+    const add = utility.createEl("button", { text: tr("toolbar.add") });
     add.addClass("bt-add-btn");
     add.addEventListener("click", () => this.openQuickAdd());
 
     // settings gear
-    const gear = bar.createEl("button", { text: "⚙" });
+    const gear = utility.createEl("button", { text: "⚙" });
     gear.addClass("bt-gear");
     gear.addEventListener("click", () => {
       (this.app as unknown as { setting: { open: () => void; openTabById: (id: string) => void } }).setting.open();
@@ -720,81 +742,492 @@ export class TaskCenterView extends ItemView {
   private renderSavedViewsToolbar(parent: HTMLElement, rerenderControls?: FilterControlsRerender) {
     const wrap = parent.createDiv({ cls: "bt-saved-views" });
     wrap.dataset.savedViews = "true";
+    const filters = wrap.createDiv({ cls: "bt-saved-view-filters" });
+    const actions = wrap.createDiv({ cls: "bt-saved-view-actions" });
 
-    this.renderSavedViewPicker(wrap, rerenderControls);
-
-    this.renderTagFilter(wrap, rerenderControls);
-
-    this.renderTimeFilter(wrap, PRIMARY_TIME_FIELD, rerenderControls);
-
-    this.renderMoreTimeFilters(wrap, rerenderControls);
-
-    this.renderStatusFilter(wrap, rerenderControls);
-
-    const selectedView = this.selectedSavedView();
-    const save = wrap.createEl("button", {
-      text: selectedView ? tr("savedViews.update") : tr("savedViews.save"),
-      cls: "bt-saved-view-save",
-    });
-    save.dataset.action = selectedView ? "update-current-view" : "save-current-view";
-    const canSave = this.hasSaveableFilters();
-    save.disabled = !canSave;
-    if (!canSave) save.title = tr("savedViews.saveDisabled");
-    save.addEventListener("click", () => {
-      void (async () => {
-        if (!this.hasSaveableFilters()) return;
-        const latestSelectedView = this.selectedSavedView();
-        if (latestSelectedView) {
-          await this.updateCurrentSavedView(latestSelectedView);
-          this.refreshFilterControls(rerenderControls);
-          return;
-        }
-        const name = await this.askSavedViewName();
-        if (!name || !name.trim()) return;
-        await this.saveCurrentView(name.trim());
-        this.refreshFilterControls(rerenderControls);
-      })();
+    this.renderSavedViewsFilterControls(filters, rerenderControls);
+    this.renderSavedViewsActionControls(actions, rerenderControls, {
+      includeSaveAs: true,
+      includeDsl: true,
+      includeManage: true,
     });
   }
 
-  private renderSavedViewPicker(parent: HTMLElement, rerenderControls?: FilterControlsRerender): void {
-    const container = parent.createDiv({ cls: "bt-filter-popover-wrap" });
-    const selected = this.selectedSavedView();
-    const trigger = container.createEl("button", {
-      text: selected?.name ?? tr("savedViews.current"),
-      cls: "bt-saved-view-select",
-    });
-    trigger.dataset.savedViewSelect = "true";
-    trigger.setAttribute("aria-haspopup", "listbox");
-    trigger.setAttribute("aria-expanded", this.filterPopoverOpen === "view" ? "true" : "false");
-    trigger.addEventListener("click", () => {
-      this.filterPopoverOpen = this.filterPopoverOpen === "view" ? null : "view";
-      this.refreshFilterControls(rerenderControls);
-    });
-    if (this.filterPopoverOpen !== "view") return;
+  private renderSavedViewsCompactBar(parent: HTMLElement) {
+    const wrap = parent.createDiv({ cls: "bt-saved-views" });
+    wrap.dataset.savedViews = "true";
+    const actions = wrap.createDiv({ cls: "bt-saved-view-actions" });
+    const selectedView = this.activeSavedView();
+    const dirty = this.isSelectedSavedViewDirty(selectedView);
 
-    const popover = container.createDiv({ cls: "bt-filter-popover bt-view-popover" });
-    popover.setAttribute("role", "listbox");
-    const current = popover.createEl("button", { text: tr("savedViews.current"), cls: "bt-menu-option" });
-    current.dataset.savedViewOption = tr("savedViews.current");
-    current.setAttribute("aria-selected", this.state.savedViewId ? "false" : "true");
-    current.addEventListener("click", () => {
-      this.clearSavedViewFilters();
-      this.refreshFilterControls(rerenderControls);
+    const filters = actions.createEl("button", {
+      text: tr("savedViews.editQuery"),
+      cls: "bt-saved-view-save",
     });
-    if (this.plugin.settings.savedViews.length === 0) {
-      popover.createDiv({ text: tr("savedViews.emptyHint"), cls: "bt-menu-empty" });
-      return;
+    filters.dataset.action = "open-query-controls";
+    filters.addEventListener("click", () => this.openQueryControlsSheet());
+
+    if (dirty) {
+      const update = actions.createEl("button", {
+        text: tr("savedViews.update"),
+        cls: "bt-saved-view-save",
+      });
+      update.dataset.action = "update-current-view";
+      update.addEventListener("click", () => {
+        void this.updateCurrentSavedView(selectedView);
+      });
+
+      const discard = actions.createEl("button", {
+        text: tr("savedViews.discard"),
+        cls: "bt-saved-view-save",
+      });
+      discard.dataset.action = "discard-current-view";
+      discard.addEventListener("click", () => {
+        this.discardCurrentDraft();
+        this.render();
+      });
     }
-    for (const view of this.plugin.settings.savedViews) {
-      const option = popover.createEl("button", { text: view.name, cls: "bt-menu-option" });
-      option.dataset.savedViewOption = view.name;
-      option.setAttribute("aria-selected", view.id === this.state.savedViewId ? "true" : "false");
-      option.addEventListener("click", () => {
-        this.applySavedView(view);
+
+    const manage = actions.createEl("button", {
+      text: tr("savedViews.manage"),
+      cls: "bt-saved-view-save",
+    });
+    manage.dataset.action = "manage-query-tabs";
+    manage.addEventListener("click", () => this.openManageTabsSheet());
+  }
+
+  private renderSavedViewsFilterControls(parent: HTMLElement, rerenderControls?: FilterControlsRerender): void {
+    this.renderTagFilter(parent, rerenderControls);
+    this.renderTimeFilter(parent, PRIMARY_TIME_FIELD, rerenderControls);
+    this.renderMoreTimeFilters(parent, rerenderControls);
+    this.renderStatusFilter(parent, rerenderControls);
+  }
+
+  private renderSavedViewsActionControls(
+    parent: HTMLElement,
+    rerenderControls?: FilterControlsRerender,
+    options: { includeSaveAs?: boolean; includeDsl?: boolean; includeManage?: boolean } = {},
+  ): void {
+    const selectedView = this.activeSavedView();
+    const dirty = this.isSelectedSavedViewDirty(selectedView);
+
+    if (dirty) {
+      const update = parent.createEl("button", {
+        text: tr("savedViews.update"),
+        cls: "bt-saved-view-save",
+      });
+      update.dataset.action = "update-current-view";
+      update.addEventListener("click", () => {
+        void (async () => {
+          await this.updateCurrentSavedView(selectedView);
+          this.refreshFilterControls(rerenderControls);
+        })();
+      });
+
+      const discard = parent.createEl("button", {
+        text: tr("savedViews.discard"),
+        cls: "bt-saved-view-save",
+      });
+      discard.dataset.action = "discard-current-view";
+      discard.addEventListener("click", () => {
+        this.discardCurrentDraft();
         this.refreshFilterControls(rerenderControls);
       });
     }
+
+    if (options.includeSaveAs) {
+      const save = parent.createEl("button", {
+        text: tr("savedViews.save"),
+        cls: "bt-saved-view-save",
+      });
+      save.dataset.action = "save-current-view";
+      save.addEventListener("click", () => {
+        void (async () => {
+          const name = await this.askSavedViewName(`${selectedView.name} Copy`);
+          if (!name || !name.trim()) return;
+          await this.saveCurrentView(name.trim());
+          this.refreshFilterControls(rerenderControls);
+        })();
+      });
+    }
+
+    if (options.includeDsl) {
+      const dsl = parent.createEl("button", {
+        text: tr("savedViews.editDsl"),
+        cls: "bt-saved-view-save",
+      });
+      dsl.dataset.action = "edit-current-view-dsl";
+      dsl.addEventListener("click", () => {
+        void this.openQueryDslModal(rerenderControls);
+      });
+    }
+
+    if (options.includeManage) {
+      const manage = parent.createEl("button", {
+        text: tr("savedViews.manage"),
+        cls: "bt-saved-view-save",
+      });
+      manage.dataset.action = "manage-query-tabs";
+      manage.addEventListener("click", () => this.openManageTabsSheet());
+    }
+  }
+
+  private visibleQueryTabs(): SavedTaskView[] {
+    return visibleSavedViews(this.plugin.settings.savedViews);
+  }
+
+  private savedViewLabels(): Record<"today" | "week" | "month" | "completed" | "unscheduled", string> {
+    return {
+      today: tr("tab.today"),
+      week: tr("tab.week"),
+      month: tr("tab.month"),
+      completed: tr("tab.completed"),
+      unscheduled: tr("tab.unscheduled"),
+    };
+  }
+
+  private isViewCurrentlyActive(view: SavedTaskView): boolean {
+    return view.id === this.state.savedViewId;
+  }
+
+  private isSavedViewDirty(view: SavedTaskView): boolean {
+    const normalized = normalizeSavedTaskView(view);
+    if (this.isViewCurrentlyActive(normalized)) {
+      return this.isSelectedSavedViewDirty(normalized);
+    }
+    const draft = this.tabDrafts.get(normalized.id);
+    return !!draft && !sameSavedViewContent(draft, normalized);
+  }
+
+  private savedViewBadges(view: SavedTaskView): string[] {
+    const badges: string[] = [];
+    if (this.isViewCurrentlyActive(view)) badges.push(tr("savedViews.currentBadge"));
+    if (this.plugin.settings.defaultSavedViewId === view.id) badges.push(tr("savedViews.defaultBadge"));
+    if (this.isSavedViewDirty(view)) badges.push(tr("savedViews.dirtyBadge"));
+    if (view.hidden) badges.push(tr("savedViews.hiddenBadge"));
+    if (view.builtin) badges.push(tr("savedViews.presetBadge"));
+    return badges;
+  }
+
+  private builtinSavedViewIdForTab(tab: TabKey): string | null {
+    switch (tab) {
+      case "today":
+        return builtinSavedViewId("today");
+      case "week":
+        return builtinSavedViewId("week");
+      case "month":
+        return builtinSavedViewId("month");
+      case "completed":
+        return builtinSavedViewId("completed");
+      case "unscheduled":
+        return builtinSavedViewId("unscheduled");
+      case "list":
+      default:
+        return null;
+    }
+  }
+
+  private legacyTabForSavedView(view: SavedTaskView): TabKey | null {
+    const normalized = normalizeSavedTaskView(view);
+    if (normalized.id === builtinSavedViewId("today")) return "today";
+    if (normalized.id === builtinSavedViewId("week")) return "week";
+    if (normalized.id === builtinSavedViewId("month")) return "month";
+    if (normalized.id === builtinSavedViewId("completed")) return "completed";
+    if (normalized.id === builtinSavedViewId("unscheduled")) return "unscheduled";
+    return normalized.view?.type === "list" ? "list" : this.tabForSavedView(normalized, "list");
+  }
+
+  private activateSavedViewById(id: string): void {
+    const view = this.plugin.settings.savedViews.find((item) => item.id === id);
+    if (!view) return;
+    this.activateSavedView(view);
+  }
+
+  private activateSavedView(view: SavedTaskView): void {
+    this.persistCurrentDraft();
+    this.applySavedView(view);
+    this.render();
+  }
+
+  private countForSavedView(view: SavedTaskView): number {
+    const normalized = normalizeSavedTaskView(view);
+    const tab = this.tabForSavedView(normalized, "list");
+    const filter = this.getSavedViewFilter(normalized);
+    const today = todayISO();
+    if (tab === "today") {
+      const activeTodos = this.tasks.filter(filter).filter((task) => task.status === "todo" && !task.inheritsTerminal);
+      const overdueCount = activeTodos.filter((task) => task.deadline && task.deadline < today).length;
+      const todayScheduled = activeTodos.filter((task) => task.scheduled === today).length;
+      return overdueCount + todayScheduled;
+    }
+    if (tab === "week") {
+      const weekStart = startOfWeek(today, this.plugin.settings.weekStartsOn);
+      const weekEnd = addDays(weekStart, 6);
+      return this.hideChildrenOfVisibleParents(
+        this.tasks.filter(filter).filter((task) => {
+          const date = taskDateColumn(task);
+          return !!date && date >= weekStart && date <= weekEnd;
+        }),
+      ).length;
+    }
+    if (tab === "month") {
+      const monthStart = startOfMonth(today);
+      const monthEnd = endOfMonth(today);
+      return this.hideChildrenOfVisibleParents(
+        this.tasks.filter(filter).filter((task) => {
+          const date = taskDateColumn(task);
+          return !!date && date >= monthStart && date <= monthEnd;
+        }),
+      ).length;
+    }
+    if (tab === "completed") {
+      return this.hideChildrenOfVisibleParents(this.tasks.filter(filter).filter((task) => task.status === "done")).length;
+    }
+    if (tab === "unscheduled") {
+      return this.hideChildrenOfVisibleParents(
+        this.tasks.filter(filter).filter((task) => task.status === "todo" && !task.inheritsTerminal && !task.scheduled),
+      ).length;
+    }
+    return this.hideChildrenOfVisibleParents(this.tasks.filter(filter)).length;
+  }
+
+  private openSavedViewMenu(event: MouseEvent, view: SavedTaskView): void {
+    const normalized = normalizeSavedTaskView(view);
+    const menu = new Menu();
+    menu.addItem((item) =>
+      item.setTitle(tr("savedViews.copy")).onClick(() => {
+        void this.copySavedView(normalized);
+      }),
+    );
+    menu.addItem((item) =>
+      item.setTitle(tr("savedViews.editDsl")).onClick(() => {
+        this.activateSavedView(normalized);
+        void this.openQueryDslModal();
+      }),
+    );
+    menu.addItem((item) =>
+      item.setTitle(tr("savedViews.rename")).onClick(() => {
+        void this.renameSavedView(normalized);
+      }),
+    );
+    menu.addItem((item) =>
+      item.setTitle(tr("savedViews.setDefault")).onClick(() => {
+        void this.setDefaultSavedView(normalized.id);
+      }),
+    );
+    menu.addItem((item) =>
+      item.setTitle(tr("savedViews.moveLeft")).onClick(() => {
+        void this.moveSavedView(normalized, -1);
+      }),
+    );
+    menu.addItem((item) =>
+      item.setTitle(tr("savedViews.moveRight")).onClick(() => {
+        void this.moveSavedView(normalized, 1);
+      }),
+    );
+    menu.addItem((item) =>
+      item.setTitle(normalized.hidden ? tr("savedViews.show") : tr("savedViews.hide")).onClick(() => {
+        void this.toggleSavedViewHidden(normalized, !normalized.hidden);
+      }),
+    );
+    menu.showAtMouseEvent(event);
+  }
+
+  private openManageTabsSheet(): void {
+    let body: HTMLElement;
+    const rerender = () => {
+      this.render();
+      if (!body) return;
+      body.empty();
+      this.renderManageTabsSheet(body, rerender);
+    };
+    const sheet = new BottomSheet(this.app, {
+      title: tr("savedViews.manageTitle"),
+      populate: (el) => {
+        body = el.createDiv({ cls: "bt-manage-tabs-sheet" });
+        this.renderManageTabsSheet(body, rerender);
+      },
+    });
+    sheet.open();
+  }
+
+  public openManageTabs(): void {
+    this.openManageTabsSheet();
+  }
+
+  private renderManageTabsSheet(parent: HTMLElement, rerender: () => void): void {
+    const topActions = parent.createDiv({ cls: "bt-manage-tabs-actions" });
+    const create = topActions.createEl("button", {
+      text: tr("savedViews.create"),
+      cls: "bt-manage-tab-btn",
+    });
+    create.addEventListener("click", () => {
+      void this.createSavedViewFromCurrent().then(rerender).catch((error) =>
+        new Notice(tr("notice.error", { msg: error instanceof Error ? error.message : String(error) }), 4000),
+      );
+    });
+    const restoreDefaults = topActions.createEl("button", {
+      text: tr("savedViews.restoreDefaultTabs"),
+      cls: "bt-manage-tab-btn",
+    });
+    restoreDefaults.addEventListener("click", () => {
+      void this.restoreAllBuiltinSavedViews().then(rerender).catch((error) =>
+        new Notice(tr("notice.error", { msg: error instanceof Error ? error.message : String(error) }), 4000),
+      );
+    });
+
+    const rows = parent.createDiv({ cls: "bt-manage-tabs-list" });
+    for (const view of this.plugin.settings.savedViews.map((item) => normalizeSavedTaskView(item))) {
+      const row = rows.createDiv({ cls: "bt-manage-tab-row" });
+      const main = row.createDiv({ cls: "bt-manage-tab-main" });
+      const title = main.createDiv({ cls: "bt-manage-tab-title", text: view.name });
+      title.dataset.queryTabId = view.id;
+      const meta = main.createDiv({ cls: "bt-manage-tab-meta" });
+      for (const badge of this.savedViewBadges(view)) {
+        if (view.hidden && badge === tr("savedViews.currentBadge")) continue;
+        meta.createSpan({ cls: "bt-manage-tab-badge", text: badge });
+      }
+      const actions = row.createDiv({ cls: "bt-manage-tab-actions" });
+      const action = (label: string, handler: () => void | Promise<void>) => {
+        const btn = actions.createEl("button", { text: label, cls: "bt-manage-tab-btn" });
+        btn.addEventListener("click", () => {
+          Promise.resolve(handler()).then(rerender).catch((error) =>
+            new Notice(tr("notice.error", { msg: error instanceof Error ? error.message : String(error) }), 4000),
+          );
+        });
+      };
+      action(tr("savedViews.open"), () => this.activateSavedView(view));
+      action(tr("savedViews.editDsl"), async () => {
+        this.activateSavedView(view);
+        await this.openQueryDslModal();
+      });
+      action(tr("savedViews.rename"), () => this.renameSavedView(view));
+      action(tr("savedViews.copy"), () => this.copySavedView(view));
+      action(tr("savedViews.setDefault"), () => this.setDefaultSavedView(view.id));
+      action(tr("savedViews.moveLeft"), () => this.moveSavedView(view, -1));
+      action(tr("savedViews.moveRight"), () => this.moveSavedView(view, 1));
+      action(view.hidden ? tr("savedViews.show") : tr("savedViews.hide"), () => this.toggleSavedViewHidden(view, !view.hidden));
+      if (view.builtin) action(tr("savedViews.restore"), () => this.restoreBuiltinSavedView(view));
+      if (!view.builtin) {
+        action(tr("savedViews.delete"), () => this.deleteSavedView(view));
+      }
+    }
+  }
+
+  private async createSavedViewFromCurrent(): Promise<void> {
+    const active = this.activeSavedView();
+    const suggestedName = active.builtin ? this.suggestSavedViewName() : `${active.name} Copy`;
+    const name = await this.askSavedViewName(suggestedName);
+    if (!name?.trim()) return;
+    await this.saveCurrentView(name.trim());
+  }
+
+  private async copySavedView(view: SavedTaskView): Promise<void> {
+    const name = await this.askSavedViewName(`${view.name} Copy`);
+    if (!name?.trim()) return;
+    const copied = duplicateSavedView(this.plugin.settings.savedViews, view.id, name.trim(), createSavedViewId);
+    this.plugin.settings.savedViews = upsertSavedView(this.plugin.settings.savedViews, copied);
+    this.tabDrafts.delete(copied.id);
+    this.applySavedView(copied);
+    await this.plugin.saveSettings();
+    this.render();
+  }
+
+  private async setDefaultSavedView(id: string): Promise<void> {
+    const view = this.plugin.settings.savedViews.find((item) => item.id === id);
+    if (!view) return;
+    if (view.hidden) {
+      throw new Error("不能把已隐藏的 Tab 设为默认。");
+    }
+    this.plugin.settings.defaultSavedViewId = id;
+    await this.plugin.saveSettings();
+    this.render();
+  }
+
+  private async moveSavedView(view: SavedTaskView, direction: -1 | 1): Promise<void> {
+    this.plugin.settings.savedViews = moveSavedViewById(this.plugin.settings.savedViews, view.id, direction);
+    await this.plugin.saveSettings();
+    this.render();
+  }
+
+  private async renameSavedView(view: SavedTaskView): Promise<void> {
+    const name = await this.askSavedViewName(view.name);
+    if (!name?.trim()) return;
+    this.plugin.settings.savedViews = renameSavedViewById(this.plugin.settings.savedViews, view.id, name.trim());
+    const renamed = this.plugin.settings.savedViews.find((item) => item.id === view.id);
+    if (renamed) this.applySavedView(renamed);
+    await this.plugin.saveSettings();
+    this.render();
+  }
+
+  private async toggleSavedViewHidden(view: SavedTaskView, hidden: boolean): Promise<void> {
+    const visible = this.visibleQueryTabs();
+    if (hidden && visible.length <= 1 && visible[0]?.id === view.id) {
+      throw new Error("至少保留一个可见 Tab。");
+    }
+    this.plugin.settings.savedViews = setSavedViewHiddenById(this.plugin.settings.savedViews, view.id, hidden);
+    if (hidden) this.tabDrafts.delete(view.id);
+    if (hidden && this.plugin.settings.defaultSavedViewId === view.id) {
+      this.plugin.settings.defaultSavedViewId = this.visibleQueryTabs().find((item) => item.id !== view.id)?.id ?? null;
+    }
+    if (hidden && this.state.savedViewId === view.id) {
+      const next = this.visibleQueryTabs().find((item) => item.id !== view.id);
+      if (next) this.applySavedView(next);
+    }
+    await this.plugin.saveSettings();
+    this.render();
+  }
+
+  private async deleteSavedView(view: SavedTaskView): Promise<void> {
+    const visible = this.visibleQueryTabs();
+    if (visible.length <= 1 && visible[0]?.id === view.id) {
+      throw new Error("至少保留一个可见 Tab。");
+    }
+    this.plugin.settings.savedViews = deleteSavedViewById(this.plugin.settings.savedViews, view.id);
+    this.tabDrafts.delete(view.id);
+    if (this.plugin.settings.defaultSavedViewId === view.id) {
+      this.plugin.settings.defaultSavedViewId = this.visibleQueryTabs()[0]?.id ?? null;
+    }
+    if (this.state.savedViewId === view.id) {
+      const next = this.visibleQueryTabs()[0];
+      if (next) this.applySavedView(next);
+    }
+    await this.plugin.saveSettings();
+    this.render();
+  }
+
+  private async restoreBuiltinSavedView(view: SavedTaskView): Promise<void> {
+    this.plugin.settings.savedViews = restoreBuiltinSavedViewById(
+      this.plugin.settings.savedViews,
+      view.id,
+      this.savedViewLabels(),
+    );
+    this.tabDrafts.delete(view.id);
+    const restored = this.plugin.settings.savedViews.find((item) => item.id === view.id);
+    if (restored && this.state.savedViewId === view.id) {
+      this.applySavedView(restored);
+    }
+    await this.plugin.saveSettings();
+    this.render();
+  }
+
+  private async restoreAllBuiltinSavedViews(): Promise<void> {
+    this.plugin.settings.savedViews = restoreBuiltinSavedViews(this.plugin.settings.savedViews, this.savedViewLabels());
+    for (const id of [
+      builtinSavedViewId("today"),
+      builtinSavedViewId("week"),
+      builtinSavedViewId("month"),
+      builtinSavedViewId("completed"),
+      builtinSavedViewId("unscheduled"),
+    ]) {
+      this.tabDrafts.delete(id);
+    }
+    const active = this.plugin.settings.savedViews.find((item) => item.id === this.state.savedViewId);
+    if (active) {
+      this.applySavedView(active);
+    }
+    await this.plugin.saveSettings();
+    this.render();
   }
 
   private renderTimeFilter(parent: HTMLElement, field: SavedViewTimeField, rerenderControls?: FilterControlsRerender): void {
@@ -1173,7 +1606,7 @@ export class TaskCenterView extends ItemView {
     const clear = empty.createEl("button", { text: tr("filters.clear"), cls: "bt-filter-empty-clear" });
     clear.dataset.action = "clear-filters";
     clear.addEventListener("click", () => {
-      this.clearSavedViewFilters();
+      this.resetActiveFilters();
       this.render();
     });
   }
@@ -1206,22 +1639,42 @@ export class TaskCenterView extends ItemView {
     this.refreshFilterControls(rerenderControls);
   }
 
-  private openMobileFilterSheet(): void {
+  private openQueryControlsSheet(): void {
     let body: HTMLElement;
+    const bodyClass = isMobileMode() ? "bt-mobile-filter-sheet" : "bt-query-controls-sheet";
     const rerenderControls = () => {
       this.render();
       if (!body) return;
       body.empty();
-      this.renderSavedViewsToolbar(body, rerenderControls);
+      this.renderQueryControlsSheet(body, rerenderControls);
     };
     const sheet = new BottomSheet(this.app, {
-      title: tr("savedViews.mobileTitle"),
+      title: tr("savedViews.queryEditorTitle"),
       populate: (el) => {
-        body = el.createDiv({ cls: "bt-mobile-filter-sheet" });
-        this.renderSavedViewsToolbar(body, rerenderControls);
+        body = el.createDiv({ cls: bodyClass });
+        this.renderQueryControlsSheet(body, rerenderControls);
       },
     });
     sheet.open();
+  }
+
+  private renderQueryControlsSheet(parent: HTMLElement, rerenderControls?: FilterControlsRerender): void {
+    parent.createDiv({ cls: "bt-query-editor-help", text: tr("savedViews.queryEditorHelp") });
+
+    const filtersSection = parent.createDiv({ cls: "bt-query-editor-section" });
+    filtersSection.createDiv({ cls: "bt-query-editor-section-title", text: tr("savedViews.queryEditorFilters") });
+    const filters = filtersSection.createDiv({ cls: "bt-saved-view-filters" });
+    this.renderSavedViewsFilterControls(filters, rerenderControls);
+
+    const actionsSection = parent.createDiv({ cls: "bt-query-editor-section" });
+    actionsSection.createDiv({ cls: "bt-query-editor-section-title", text: tr("savedViews.queryEditorActions") });
+    actionsSection.createDiv({ cls: "bt-query-editor-section-note", text: tr("savedViews.queryEditorActionsNote") });
+    const actions = actionsSection.createDiv({ cls: "bt-saved-view-actions" });
+    this.renderSavedViewsActionControls(actions, rerenderControls, {
+      includeSaveAs: true,
+      includeDsl: true,
+      includeManage: true,
+    });
   }
 
   private navLabel(): string {
@@ -1975,6 +2428,52 @@ export class TaskCenterView extends ItemView {
     });
   }
 
+  private renderList(parent: HTMLElement): void {
+    const active = this.activeSavedView();
+    const filter = this.getTextFilter();
+    const list = this.hideChildrenOfVisibleParents(this.tasks.filter(filter));
+    this.sortListTasks(list, active.view?.orderBy);
+    if (list.length === 0) {
+      if (this.tasks.length > 0) this.renderFilterEmptyState(parent);
+      else parent.createDiv({ text: tr("filters.empty"), cls: "bt-empty" });
+      return;
+    }
+    const wrap = parent.createDiv({ cls: "bt-list-view" });
+    for (const task of list) this.renderCard(wrap, task);
+  }
+
+  private sortListTasks(tasks: ParsedTask[], orderBy: string[] | undefined): void {
+    const order = orderBy ?? [];
+    tasks.sort((left, right) => {
+      for (const rule of order) {
+        if (rule === "completed_desc") {
+          const cmp = (right.completed ?? "").localeCompare(left.completed ?? "");
+          if (cmp !== 0) return cmp;
+          continue;
+        }
+        if (rule === "created_desc") {
+          const cmp = (right.created ?? "").localeCompare(left.created ?? "");
+          if (cmp !== 0) return cmp;
+          continue;
+        }
+        if (rule === "deadline_risk") {
+          const leftDeadline = left.deadline ?? "9999-99-99";
+          const rightDeadline = right.deadline ?? "9999-99-99";
+          const cmp = leftDeadline.localeCompare(rightDeadline);
+          if (cmp !== 0) return cmp;
+          continue;
+        }
+      }
+      const scheduledCmp = (left.scheduled ?? "9999-99-99").localeCompare(right.scheduled ?? "9999-99-99");
+      if (scheduledCmp !== 0) return scheduledCmp;
+      const deadlineCmp = (left.deadline ?? "9999-99-99").localeCompare(right.deadline ?? "9999-99-99");
+      if (deadlineCmp !== 0) return deadlineCmp;
+      const createdCmp = (right.created ?? "").localeCompare(left.created ?? "");
+      if (createdCmp !== 0) return createdCmp;
+      return left.title.localeCompare(right.title);
+    });
+  }
+
   private async refreshAfterAction(): Promise<void> {
     await this.plugin.cache.forFlush();
     await this.reloadTasks();
@@ -2565,6 +3064,24 @@ export class TaskCenterView extends ItemView {
     };
   }
 
+  private getSavedViewFilter(view: SavedTaskView): (t: ParsedTask) => boolean {
+    const normalized = normalizeSavedTaskView(view);
+    const q = normalized.search.trim().toLowerCase();
+    const tags = parseFilterTags(normalized.tag);
+    const time = normalized.time;
+    const status = normalizeSavedViewStatus(normalized.status);
+    if (!q && tags.length === 0 && !this.hasTimeFilters(time) && status === "all") return () => true;
+    return (t) => {
+      if (q && !taskMatchesText(t, q)) return false;
+      for (const tag of tags) {
+        if (!taskHasTag(t, tag)) return false;
+      }
+      if (!this.taskMatchesTimeFilters(t, time)) return false;
+      if (status !== "all" && !status.includes(t.status)) return false;
+      return true;
+    };
+  }
+
   private hasTimeFilters(time: SavedViewTimeFilters): boolean {
     return Object.values(time).some((value) => !!value?.trim());
   }
@@ -2601,7 +3118,7 @@ export class TaskCenterView extends ItemView {
       if (status !== "all" && !status.includes(task.status)) continue;
       for (const tag of task.tags) add(tag, 1);
     }
-    for (const view of this.plugin.settings.savedViews) {
+    for (const view of this.plugin.settings.savedViews.map((item) => normalizeSavedTaskView(item))) {
       for (const tag of parseFilterTags(view.tag)) add(tag);
     }
     for (const tag of selected) add(tag);
@@ -2632,23 +3149,34 @@ export class TaskCenterView extends ItemView {
     this.refreshFilterControls(rerenderControls);
   }
 
-  private clearSavedViewFilters(): void {
-    const filters = emptySavedViewFilters();
-    this.state.savedViewId = filters.savedViewId;
-    this.state.filter = filters.search;
-    this.state.savedViewTag = filters.tag;
-    this.state.savedViewTime = filters.time;
-    this.state.savedViewStatus = filters.status;
+  private discardCurrentDraft(): void {
+    const active = this.activeSavedView();
+    this.tabDrafts.delete(active.id);
+    this.applySavedView(active);
+  }
+
+  private resetActiveFilters(): void {
+    this.state.filter = "";
+    this.state.savedViewTag = "";
+    this.state.savedViewTime = {};
+    this.state.savedViewStatus = "all";
     this.filterPopoverOpen = null;
+    this.pendingDateRangeStart = null;
   }
 
   private applySavedView(view: SavedTaskView): void {
-    const filters = applySavedViewFilters(view);
+    const saved = normalizeSavedTaskView(view);
+    const effective = normalizeSavedTaskView(this.tabDrafts.get(saved.id) ?? saved);
+    const filters = applySavedViewFilters(effective);
     this.state.savedViewId = filters.savedViewId;
     this.state.filter = filters.search;
     this.state.savedViewTag = filters.tag;
     this.state.savedViewTime = filters.time;
     this.state.savedViewStatus = filters.status;
+    this.state.tab = this.tabForSavedView(effective, this.state.tab);
+    this.plugin.settings.lastTab = this.state.tab;
+    this.plugin.settings.lastSavedViewId = saved.id;
+    this.plugin.saveSettings().catch(() => undefined);
     this.filterPopoverOpen = null;
   }
 
@@ -2659,21 +3187,36 @@ export class TaskCenterView extends ItemView {
     );
   }
 
-  private askSavedViewName(): Promise<string | null> {
+  private askSavedViewName(initialName = this.suggestSavedViewName()): Promise<string | null> {
     return new Promise((resolve) => {
-      new SavedViewNameModal(this.app, this.suggestSavedViewName(), resolve).open();
+      new SavedViewNameModal(this.app, initialName, resolve).open();
     });
   }
 
   private async saveCurrentView(name: string): Promise<void> {
-    const view = createSavedView(name, {
-      search: this.state.filter,
-      tag: this.state.savedViewTag,
-      time: this.state.savedViewTime,
-      status: this.state.savedViewStatus,
+    const active = this.activeSavedView();
+    const view = normalizeSavedTaskView({
+      ...this.currentQuerySnapshot(active, name),
+      id: createSavedViewId(),
+      builtin: false,
+      hidden: false,
     });
     this.plugin.settings.savedViews = upsertSavedView(this.plugin.settings.savedViews, view);
+    this.tabDrafts.delete(view.id);
     this.applySavedView(view);
+    await this.plugin.saveSettings();
+  }
+
+  private async saveCurrentViewFromDsl(view: SavedTaskView): Promise<void> {
+    const normalized = normalizeSavedTaskView({
+      ...view,
+      id: createSavedViewId(),
+      builtin: false,
+      hidden: false,
+    });
+    this.plugin.settings.savedViews = upsertSavedView(this.plugin.settings.savedViews, normalized);
+    this.tabDrafts.delete(normalized.id);
+    this.applySavedView(normalized);
     await this.plugin.saveSettings();
   }
 
@@ -2685,16 +3228,139 @@ export class TaskCenterView extends ItemView {
         tag: this.state.savedViewTag,
         time: this.state.savedViewTime,
         status: this.state.savedViewStatus,
+        view: this.currentSavedViewConfig(),
+        summary: this.currentSavedViewSummary(),
       },
       () => existing.id,
     );
     this.plugin.settings.savedViews = updateSavedViewById(this.plugin.settings.savedViews, view);
+    this.tabDrafts.delete(existing.id);
     this.applySavedView(view);
     await this.plugin.saveSettings();
   }
 
+  private async updateCurrentSavedViewFromDsl(existing: SavedTaskView, dslText: string): Promise<void> {
+    const parsed = parseSavedViewDsl(dslText, existing);
+    const normalized = normalizeSavedTaskView({
+      ...parsed,
+      id: existing.id,
+      builtin: existing.builtin,
+    });
+    this.plugin.settings.savedViews = updateSavedViewById(this.plugin.settings.savedViews, normalized);
+    this.tabDrafts.delete(existing.id);
+    this.applySavedView(normalized);
+    await this.plugin.saveSettings();
+  }
+
   private selectedSavedView(): SavedTaskView | null {
-    return this.plugin.settings.savedViews.find((view) => view.id === this.state.savedViewId) ?? null;
+    const view = this.plugin.settings.savedViews.find((item) => item.id === this.state.savedViewId) ?? null;
+    return view ? normalizeSavedTaskView(view) : null;
+  }
+
+  private persistCurrentDraft(): void {
+    const selected = this.selectedSavedView();
+    if (!selected) return;
+    if (this.isSelectedSavedViewDirty(selected)) {
+      this.tabDrafts.set(selected.id, this.currentQuerySnapshot(selected));
+    } else {
+      this.tabDrafts.delete(selected.id);
+    }
+  }
+
+  private activeSavedView(): SavedTaskView {
+    const selected = this.selectedSavedView();
+    if (selected) return selected;
+    const fallback = this.visibleQueryTabs()[0];
+    if (fallback) return fallback;
+    return normalizeSavedTaskView({
+      id: builtinSavedViewId("today"),
+      name: tr("tab.today"),
+      builtin: true,
+      hidden: false,
+      search: "",
+      tag: "",
+      time: {},
+      status: ["todo"],
+      view: { type: "list", preset: "today" },
+      summary: [],
+    });
+  }
+
+  private currentQuerySnapshot(existing?: SavedTaskView | null, name?: string): SavedTaskView {
+    return normalizeSavedTaskView({
+      id: existing?.id ?? `draft-${this.state.tab}`,
+      name: (name ?? existing?.name ?? this.suggestSavedViewName()).trim(),
+      builtin: existing?.builtin ?? false,
+      hidden: existing?.hidden ?? false,
+      search: this.state.filter,
+      tag: this.state.savedViewTag,
+      time: this.state.savedViewTime,
+      status: this.state.savedViewStatus,
+      view: this.currentSavedViewConfig(),
+      summary: this.currentSavedViewSummary(),
+    });
+  }
+
+  private isSelectedSavedViewDirty(view: SavedTaskView): boolean {
+    return !sameSavedViewContent(this.currentQuerySnapshot(view), view);
+  }
+
+  private async openQueryDslModal(rerenderControls?: FilterControlsRerender): Promise<void> {
+    const selected = this.activeSavedView();
+    const snapshot = this.currentQuerySnapshot(selected);
+    const initial = stringifySavedViewDsl(snapshot);
+    new QueryDslModal(this.app, initial, true, async (mode: QueryDslSubmitMode, text: string) => {
+      if (mode === "update") {
+        await this.updateCurrentSavedViewFromDsl(selected, text);
+      } else {
+        const parsed = parseSavedViewDsl(text, { name: this.suggestSavedViewName() });
+        await this.saveCurrentViewFromDsl(parsed);
+      }
+      this.refreshFilterControls(rerenderControls);
+    }).open();
+  }
+
+  private currentSavedViewConfig(): SavedViewConfig {
+    switch (this.state.tab) {
+      case "week":
+        return { type: "week" };
+      case "month":
+        return { type: "month" };
+      case "list":
+        return { type: "list" };
+      case "completed":
+        return { type: "list", preset: "completed", orderBy: ["completed_desc"] };
+      case "unscheduled":
+        return { type: "list", preset: "unscheduled", orderBy: ["deadline_risk", "created_desc"] };
+      case "today":
+      default:
+        return { type: "list", preset: "today" };
+    }
+  }
+
+  private currentSavedViewSummary(): SavedViewSummaryMetric[] {
+    if (this.state.tab === "completed") {
+      return [
+        { type: "count" },
+        { type: "sum", field: "actual", format: "duration" },
+        { type: "ratio", numerator: "actual", denominator: "estimate", format: "percent" },
+      ];
+    }
+    if (this.state.tab === "unscheduled") {
+      return [{ type: "count" }];
+    }
+    return [];
+  }
+
+  private tabForSavedView(view: SavedTaskView, fallback: TabKey): TabKey {
+    const config = normalizeSavedTaskView(view).view;
+    if (config?.type === "week") return "week";
+    if (config?.type === "month") return "month";
+    if (config?.preset === "completed") return "completed";
+    if (config?.preset === "unscheduled") return "unscheduled";
+    if (config?.preset === "today") return "today";
+    if (config?.type === "list") return "list";
+    return fallback;
   }
 
   private refreshFilterControls(rerenderControls?: FilterControlsRerender): void {
@@ -2771,13 +3437,13 @@ export class TaskCenterView extends ItemView {
   handleKey(e: KeyboardEvent): void {
     if (Platform.isMobile) return;
 
-    // Global tab switching
+    // Global query-tab switching
     if (e.ctrlKey && !e.metaKey && !e.shiftKey && !e.altKey) {
-      // US-720: today tab takes ⌃1, others shift one slot down.
-      const map: Record<string, TabKey> = { "1": "today", "2": "week", "3": "month", "4": "completed", "5": "unscheduled" };
-      if (map[e.key]) {
+      const tabs = this.visibleQueryTabs().slice(0, 9);
+      const target = tabs[Number(e.key) - 1];
+      if (target) {
         e.preventDefault();
-        this.setTab(map[e.key]);
+        this.activateSavedView(target);
         return;
       }
     }

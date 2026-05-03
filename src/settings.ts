@@ -1,6 +1,7 @@
 import { App, Notice, PluginSettingTab, Setting } from "obsidian";
 import { t as tr } from "./i18n";
 import type TaskCenterPlugin from "./main";
+import { restoreBuiltinSavedViews, visibleSavedViews } from "./saved-views";
 
 const SKILL_INSTALL_COMMAND = "npx skills add CorrectRoadH/obsidian-task-center";
 
@@ -21,27 +22,64 @@ export class TaskCenterSettingTab extends PluginSettingTab {
     // writes only to Obsidian Daily Notes; tags are ordinary markdown data
     // surfaced through filters and saved views.
 
-    // US-111: default-tab setting decides which view first-open lands on
-    // (week / month / completed / unscheduled). `lastTab` (US-405)
-    // overrides this once the user has actually opened the board at
-    // least once; this setting is the cold-start fallback.
-    // see USER_STORIES.md
     new Setting(containerEl)
-      .setName(tr("settings.defaultView.name"))
-      .setDesc(tr("settings.defaultView.desc"))
-      .addDropdown((dd) =>
-        dd
-          .addOptions({
-            today: tr("settings.defaultView.today"),
-            week: tr("settings.defaultView.week"),
-            month: tr("settings.defaultView.month"),
-            completed: tr("settings.defaultView.completed"),
-            unscheduled: tr("settings.defaultView.unscheduled"),
-          })
-          .setValue(this.plugin.settings.defaultView)
+      .setName(tr("settings.defaultSavedView.name"))
+      .setDesc(tr("settings.defaultSavedView.desc"))
+      .addDropdown((dd) => {
+        dd.addOption("", tr("settings.defaultSavedView.none"));
+        for (const view of visibleSavedViews(this.plugin.settings.savedViews)) {
+          dd.addOption(view.id, view.name);
+        }
+        return dd
+          .setValue(this.plugin.settings.defaultSavedViewId ?? "")
           .onChange(async (v) => {
-            this.plugin.settings.defaultView = v as "today" | "week" | "month" | "completed" | "unscheduled";
+            this.plugin.settings.defaultSavedViewId = v || null;
             await this.plugin.saveSettings();
+          });
+      });
+
+    new Setting(containerEl)
+      .setName(tr("settings.restoreBuiltins.name"))
+      .setDesc(tr("settings.restoreBuiltins.desc"))
+      .addButton((btn) =>
+        btn
+          .setButtonText(tr("settings.restoreBuiltins.action"))
+          .onClick(async () => {
+            this.plugin.settings.savedViews = restoreBuiltinSavedViews(this.plugin.settings.savedViews, {
+              today: tr("tab.today"),
+              week: tr("tab.week"),
+              month: tr("tab.month"),
+              completed: tr("tab.completed"),
+              unscheduled: tr("tab.unscheduled"),
+            });
+            const visible = visibleSavedViews(this.plugin.settings.savedViews);
+            if (
+              this.plugin.settings.defaultSavedViewId
+              && !visible.some((view) => view.id === this.plugin.settings.defaultSavedViewId)
+            ) {
+              this.plugin.settings.defaultSavedViewId = visible[0]?.id ?? null;
+            }
+            if (
+              this.plugin.settings.lastSavedViewId
+              && !visible.some((view) => view.id === this.plugin.settings.lastSavedViewId)
+            ) {
+              this.plugin.settings.lastSavedViewId = visible[0]?.id ?? null;
+            }
+            await this.plugin.saveSettings();
+            await this.plugin.refreshOpenViews();
+            this.display();
+            new Notice(tr("settings.restoreBuiltins.name"));
+          }),
+      );
+
+    new Setting(containerEl)
+      .setName(tr("settings.manageTabs.name"))
+      .setDesc(tr("settings.manageTabs.desc"))
+      .addButton((btn) =>
+        btn
+          .setButtonText(tr("settings.manageTabs.action"))
+          .onClick(async () => {
+            await this.plugin.openManageTabs();
           }),
       );
 
@@ -134,6 +172,10 @@ export class TaskCenterSettingTab extends PluginSettingTab {
       [
         "obsidian task-center:list scheduled=today",
         "obsidian task-center:list scheduled=unscheduled tag='#tag'",
+        "obsidian task-center:query-list format=json",
+        "obsidian task-center:query-show id=preset-week",
+        "obsidian task-center:query-save dsl='{\"name\":\"工作\",\"filters\":{\"tags\":[\"#work\"]},\"view\":{\"type\":\"list\"}}'",
+        "obsidian task-center:query-update id=sv-alpha dsl='{\"name\":\"工作周\",\"view\":{\"type\":\"week\"}}'",
         "obsidian task-center:schedule ref=Tasks/Inbox.md:L42 date=2026-04-25",
         "obsidian task-center:done ref=Tasks/Inbox.md:L42 at=2026-04-23",
         "obsidian task-center:add text=\"处理示例任务\" tag=\"#tag\" scheduled=2026-04-26",

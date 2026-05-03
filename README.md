@@ -120,6 +120,19 @@ To install the companion AI skill:
 npx skills add CorrectRoadH/obsidian-task-center
 ```
 
+## Crabbox
+
+This repository includes repo-local Crabbox onboarding for remote verification on Blacksmith Testboxes.
+
+```bash
+crabbox warmup
+crabbox run -- pnpm run typecheck
+crabbox run -- pnpm run test:unit
+crabbox run -- pnpm run test:e2e
+```
+
+The default repo config lives in `.crabbox.yaml` and points at `.github/workflows/blacksmith-testbox.yml`. If your Blacksmith account needs an explicit org, export `CRABBOX_BLACKSMITH_ORG` before `crabbox warmup`.
+
 ## Settings
 
 | Setting | Default | What it controls |

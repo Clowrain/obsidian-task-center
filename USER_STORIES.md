@@ -52,7 +52,17 @@
 
 ### 看板 & Query View
 
-核心抽象：顶部 tab 不是固定页面名，而是**一个已命名 query**。每个 query = `filters + view + summary`。`filters` 决定“哪些任务进入集合”；`view` 决定“这些任务怎么摆出来”，包含布局、分组、排序和空状态解释。`TODO`、`已完成`、`已放弃`、`未排期` 都只是 filter 条件；用户自己的优先级、项目域、精力方法、每日执行法都只是可编辑 query / view 配置，不是应用层业务模型。用户可以保存自己的 query 并把它放到顶部 tab，和预设 tab 平级。换句话说，这次产品方向是把“定制任务中心界面”的权力交给用户：我们给稳定的积木，不替用户硬编码唯一工作台。
+核心抽象：顶部 tab 不是固定页面名，而是**一个已命名 query**。每个 query = `filters + view + summary`。`filters` 决定“哪些任务进入集合”；`view` 决定“这些任务怎么摆出来”，包含布局、分组、排序和空状态解释；`summary` 决定“对同一批结果怎么算 / 怎么汇总”。`TODO`、`已完成`、`已放弃`、`未排期` 都只是 filter 条件；用户自己的优先级、项目域、精力方法、每日执行法都只是可编辑 query / view 配置，不是应用层业务模型。用户可以保存自己的 query 并把它放到顶部 tab，和预设 tab 平级。换句话说，这次产品方向是把“定制任务中心界面”的权力交给用户：我们给稳定的积木，不替用户硬编码唯一工作台。
+
+进一步说，**query 本身可以看成一个声明式 DSL 配置对象**。多数用户不会直接手写 DSL，而是通过图形化控件点选 filter、切换 view、配置 summary；但这些控件编辑的底层对象应该是同一份声明式 query，而不是各自一套难以组合的 UI 状态。也就是说，用户“选 filter”本质上就是在编辑 DSL，只是我们给了可视化编辑器。
+
+这里还要把运行时概念说死，避免又长出一层“当前 query”平行模型：
+
+- `tab` = 一个**持久化、可命名、可排序、可隐藏**的 query preset
+- `draft` = 挂在某个 tab 上的**未保存改动**
+- `effective query` = 当前激活 tab 的“已保存 query + 该 tab 的 draft 覆盖”之后的实际生效结果
+
+因此产品里**没有必要再有一个独立持久化的“当前 query”对象**。用户总是在“编辑某个 tab 的 query”，而不是在 tab 之外再维护一份无归属 query。
 
 - `US-100` **View 类型清单**。V1 提供四种通用 view，所有 query tab 必须从这里选一种：`list` 列表、`week` 周、`month` 月、`matrix` 矩阵。`summary` 是 query 的汇总配置，不是 view；搜索结果、TODO、已完成、已放弃、未排期、今日、用户自定义优先级、工作/个人等都不是 view 类型，而是 filters + view 配置的组合。未来新增 view 类型（如看板泳道、复盘报表）必须另开故事定义它如何改变布局、统计、拖拽和空状态，不能混进 filter。
 - `US-101` **周 view**：把当前 query 命中的任务按有效 `⏳ scheduled` 落到一周 7 天里，一眼看到哪天塞满了、今日高亮，并可切到上一周 / 下一周。桌面 / 大屏 week 是 7 个日期列；移动端 week 是 7 个日期 row（见 US-503）。两者只是布局不同，**日期归属、任务计数、估时合计、改期结果必须完全一致**。周 view 主区域不能塌得太矮：桌面与移动端主体最小高度至少占当前 Task Center 可视高度的一半，否则 PM 认为视觉上不成立。周 view 只负责按 `⏳` 日期归组，不暗含状态；已完成 / 已放弃任务也可以在用户选择对应状态 filter 后用周 view 复盘。
@@ -71,25 +81,131 @@
   - 排期 = 安排时间控件，不是裸 `YYYY-MM-DD` 输入框；只按任务自己的有效 `⏳ scheduled` 筛选，常用预设放一级，自定义范围进入 date picker（同 US-207）。`unscheduled` 是缺少有效 `⏳` 的条件，作为 `time.scheduled is empty` filter 表达。排期 filter 不读取 `➕ 创建日期`、`📅 截止日期`、`✅ 完成日期`，也不把“逾期”伪装成时间范围。
   - 时间字段 = `⏳ 排期`、`📅 截止`、`✅ 完成于`、`❌ 放弃于`、`➕ 创建于` 都是独立 filter namespace，不能混成一个含义不明的 `date`。
   - 汇总 = 对当前筛选后的集合计算任务数、估时、实际耗时、字段 sum / ratio 等复盘值。
+- `US-109t` **Filter / View / Summary 是同一套 Query DSL 的三个分区**。无论用户是点按钮、勾 checkbox、选日期范围，还是未来直接导入 / 粘贴 query 配置，本质上都在编辑同一份声明式 query 对象。图形化筛选栏是这个 DSL 的可视化编辑器，不是另一套独立模型。这个 DSL 至少要能稳定表达：`filters`（搜索、tag、status、time 命题）、`view`（type、sections / axis / buckets / sort）、`summary`（scope 与 metrics 列表）。`summary` 不要求用户写任意公式语言；V1 先以声明式 metrics 配置表达，如 count / sum / ratio / top-N / group-by。
+- `US-109u` **没有独立“当前 query”实体，只有当前激活 tab 的 effective query**。用户在工具条里改 filter / view / summary 时，改的是“当前激活 tab 的 draft”；渲染、badge、空状态、summary、拖拽目标、默认打开位置都读取这个 tab 的 effective query。切到别的 tab 时，原 tab 的 draft 留在原 tab 身上，不漂浮成一个全局“当前 query”。“另存为新 tab”不是保存某个无归属 query，而是把“当前激活 tab 的 effective query”复制成一个新的具名 tab。
 - `US-109a` **筛选栏不是一个“筛选”下拉**。桌面筛选栏的每个控件必须说清自己筛什么：搜索框 placeholder 是“搜索任务”，tag 控件是“标签”按钮 + popover，排期控件是“排期”范围 popover，状态控件是“状态”按钮 + popover。如果某一维没有可选项，该控件隐藏或 disabled 并说明原因，不能显示一个点开后仍只有“筛选”的 option。
 - `US-109b` **组合筛选必须可解释**。筛选栏要能显示当前条件摘要，例如 `tag:#alpha,#beta · 排期:本周 · 状态:TODO · view:周`；用户能一键清空临时筛选。空结果时说明是筛选导致的、view 与 filter 组合天然为空，还是全 vault 没任务，并提供“清空筛选”或“切换 view”动作。比如 `未排期 + 周 view` 空结果不能只显示空白，要解释“未排期任务没有 `⏳`，不会落入周日历”。
-- `US-109c` **保存 / 更新 Query Tab**：用户可以把常用 `filters + view + summary` 命名保存成固定 tab，比如“TODO”“已完成”“已放弃”“今日”“本周”“本月”“未排期”“工作”“本周复盘”“我的优先级”。当当前 tab 是预设或用户保存的 query，且用户临时改了筛选 / view / 汇总配置时，界面必须显式进入“有未保存改动”状态；主按钮文案是“更新”（英文 Update），点击后直接覆盖这个 query；旁边提供“另存为新 tab”创建新 query；也提供“放弃改动”回到原 query。当当前处在“临时查询”上下文时，主按钮文案是“保存为 tab”（英文 Save as tab），点击后要求用户命名并创建新 tab。保存 query 只是 UI preset，不改 markdown、不保存当时的任务列表快照。时间条件保存为语义化结构：`time.scheduled` / `time.deadline` / `time.completed` / `time.abandoned` / `time.created`，不保存含义不明的 `date` 字段。
+- `US-109c` **保存 / 更新 Query Tab**：用户可以把常用 `filters + view + summary` 命名保存成固定 tab，比如“TODO”“已完成”“已放弃”“今日”“本周”“本月”“未排期”“工作”“本周复盘”“我的优先级”。当当前 tab 是预设或用户保存的 query，且用户临时改了筛选 / view / 汇总配置时，界面必须显式进入“有未保存改动”状态；主按钮文案是“更新”（英文 Update），点击后直接覆盖这个 tab 当前已保存的 query；旁边提供“另存为新 tab”创建新 query；也提供“放弃改动”回到原 query。当当前处在“临时查询”上下文时，主按钮文案是“保存为 tab”（英文 Save as tab），点击后要求用户命名并创建新 tab。保存 query 只是 UI preset，不改 markdown、不保存当时的任务列表快照。时间条件保存为语义化结构：`time.scheduled` / `time.deadline` / `time.completed` / `time.abandoned` / `time.created`，不保存含义不明的 `date` 字段。
+- `US-109c1` **更新 / 保存 / 另存为的语义必须互斥且可预期**。`更新当前 tab` = 把当前激活 tab 的 effective query 覆盖写回这个 tab 自己的已保存 preset，tab id 不变；`另存为新 tab` = 复制当前 effective query 生成一个新的具名 tab，不影响原 tab；`保存为 tab` = 仅在当前结果还没有归属 tab 时出现，用来把一次临时查询第一次落成 tab。界面不能同时把“更新”和“保存”为同一件事，也不能让用户误以为“另存为”会覆盖当前 tab。
 - `US-109d` **tag 选择器的选项来源与形态**。tag 选项按“当前 query 中除 tag 外的其它 filter 条件”筛出的候选集合计算，并显示每个 tag 的命中数；已选 tag 即使命中数变成 0 也要留在列表里直到用户手动取消或清空筛选。选中多个 tag 默认是 AND 语义：任务必须同时包含这些 tag 才显示。控件形态为“标签”按钮 + popover：未选时按钮显示“标签”，选 1 个时按钮直接显示该 tag，选多个时显示“第一个 tag +N”；不要在按钮旁边再铺一排外部 tag chip。popover 顶部有搜索框，下面是自绘 checkbox 行；长 tag 单行截断但可看完整 title；排序为已选优先、命中数降序、locale 排序。不得使用原生 `<select multiple>` 展示 tag 列表，也不得依赖原生 checkbox/label 的点击行为；点击整行必须稳定切换选中态并立刻更新按钮摘要 / visible set。
 - `US-109e` **排期范围选择器形态**。排期控件默认展示“排期”，点开后是自绘 popover，不用原生 select，也不把自定义路径做成手输日期表单。popover 左侧/上方是快捷排期范围：全部排期、今天、明天、本周、下周、本月；右侧/下方是日历视图：月份前后切换、星期列按 US-112 一周起始设置排列、日期格可点击。日历视图固定表达“开始排期 → 结束排期”的范围选择：第一次点击日期只标记开始，第二次点击日期写入闭区间 `FROM..TO`；若第二次早于第一次，自动交换开始 / 结束。popover 内必须有“清空排期范围”动作，能一键回到无排期过滤。工具栏按钮显示紧凑摘要（如 `04-08 - 04-23`），不能用完整 ISO 范围撑破布局。快捷范围不能渲染成一串占满宽度的大主按钮；选中态只做轻量高亮，避免压过工具栏。用户看到的日期按 locale 显示，query 和 CLI 表达仍用稳定 token：`all / today / tomorrow / week / next-week / month / YYYY-MM-DD / FROM..TO`；其中 `YYYY-MM-DD` 作为 legacy / CLI 精确排期表达可读可显示，但日历 UI 默认产出范围 token。`overdue` 是 deadline 风险状态，属于 Today 逾期组；`unscheduled` 是缺少 `⏳` 的排期状态，属于 `time.scheduled is empty` filter / CLI 参数，不属于排期范围 token。
 - `US-109f` **View 配置不能硬编码业务**。view 可以包含 section、bucket、axis、排序、空 bucket 是否显示等展示规则，但这些规则只能来自用户配置或可编辑的预设配置，不能来自应用层写死的业务知识。任何 tag / inline field / bucket 名都只是普通用户数据；它们可以被用户拿来配置列表 section 或矩阵 bucket，但应用层不能理解这些字面量是什么意思。
 - `US-109g` **顶部 Query Tab 可扩展**。系统内置一组预设 tab，但用户可以添加、复制、重命名、排序、隐藏、删除自己的 query tab；用户 tab 与预设 tab 使用同一套 query 模型和 view，不分“上面的官方 tab / 下面的自定义视图”。tab 切换控件不用原生 select；桌面是顶部 tab strip，移动端可折叠为横向滚动 tab 或“更多”入口，但不能把用户添加的 tab 降级到二等位置。没有用户自定义 tab 时，设置筛选后要提示可保存为新 tab。
 - `US-109h` **状态筛选不用原生 select，且必须支持多选**。状态控件是轻量按钮 + popover，按钮默认显示“状态”，popover 选项固定按顺序为：全部、TODO、完成、放弃。点击“全部”清空状态条件；点击 TODO / 完成 / 放弃以自绘 checkbox 行稳定切换选中态，允许同时筛出多个状态，过滤立即生效且 popover 保持可继续选择。选中态只做轻量高亮，视觉层级低于保存 / 更新 query 按钮，不出现系统原生菜单。
 - `US-109i` **其它时间字段必须按用户问题单独命名**。用户想筛时间时，其实是在问不同问题：`⏳ 排期` 回答“我打算什么时候做”，`📅 截止` 回答“什么快到期 / 已逾期”，`✅ 完成于` 回答“我什么时候完成了什么”，`❌ 放弃于` 回答“我什么时候放弃了什么”，`➕ 创建于` 回答“什么时候捕捉 / 录入的”。主筛选栏默认只放高频行动维度“排期”；`截止 / 完成于 / 放弃于 / 创建于` 放在“更多时间”里，激活后用 `时间 +N` 暴露当前有几个高级时间条件。每个时间字段打开后复用同一套范围选择器，但标题必须带字段名，例如“截止范围”“完成于范围”。这些字段必须写入独立 token namespace，不能复用“排期”控件，也不能把这些字段混入 `scheduled` 过滤结果。
-- `US-109j` **预设 Query Tab**。默认提供这些 tab，用户可隐藏 / 重排 / 复制后修改：`今日`（状态 TODO + 列表 view，sections = 逾期 / 今日 / 未排期推荐，见 US-720）、`本周`（状态 TODO + 排期本周 + 周 view）、`本月`（状态 TODO + 排期本月 + 月 view）、`TODO`（状态 TODO + 列表 view）、`未排期`（状态 TODO + 无有效 `⏳` + 列表 view）、`已完成`（状态完成 + 列表 view）、`已放弃`（状态放弃 + 列表 view）。这些只是出厂 query，不是硬编码的唯一入口。
+- `US-109j` **预设 Query Tab**。默认提供这些 tab，用户可隐藏 / 重排 / 复制后修改。这些只是出厂 query，不是硬编码的唯一入口；实现上要能明确落成对应 DSL，而不是只靠显示名分支。V1 预设 DSL 至少包含下列等价结构：
+
+```yaml
+- id: preset-today
+  name: 今日
+  filters:
+    status: [todo]
+  view:
+    type: list
+    preset: today
+    sections:
+      - id: overdue
+        title: 逾期
+        when: deadline < today
+        limit: 3
+      - id: today
+        title: 今日
+        when: scheduled == today
+        limit: 3
+      - id: unscheduled-rec
+        title: 未排期推荐
+        when: scheduled is empty
+        order_by: [deadline_risk, created_desc]
+        limit: 3
+  summary: []
+
+- id: preset-week
+  name: 本周
+  filters:
+    status: [todo]
+    time:
+      scheduled: week
+  view:
+    type: week
+  summary: []
+
+- id: preset-month
+  name: 本月
+  filters:
+    status: [todo]
+    time:
+      scheduled: month
+  view:
+    type: month
+  summary: []
+
+- id: preset-todo
+  name: TODO
+  filters:
+    status: [todo]
+  view:
+    type: list
+    sections: []
+  summary: []
+
+- id: preset-unscheduled
+  name: 未排期
+  filters:
+    status: [todo]
+    time:
+      scheduled: unscheduled
+  view:
+    type: list
+    order_by: [deadline_risk, created_desc]
+  summary: []
+
+- id: preset-completed
+  name: 已完成
+  filters:
+    status: [done]
+  view:
+    type: list
+    order_by: [completed_desc]
+  summary:
+    - type: count
+    - type: sum
+      field: actual
+      format: duration
+    - type: ratio
+      numerator: actual
+      denominator: estimate
+      format: percent
+
+- id: preset-dropped
+  name: 已放弃
+  filters:
+    status: [dropped]
+  view:
+    type: list
+    order_by: [abandoned_desc]
+  summary:
+    - type: count
+```
+
+  上面是**规范化 DSL 示例**，不是要求用户手写 YAML；UI 里的预设 tab、筛选栏、view 配置器、summary 配置器都只是这份 DSL 的图形编辑器。字段名可以是 JSON / TS 对象 / YAML 任一序列化形式，但语义必须等价，不能靠 `"today"` / `"completed"` 这种显示名做隐式业务分支。
 - `US-109k` **View 选择是 query 配置的一部分**。同一组 filter 可以用不同 view 看：例如 `状态 TODO + 排期本周` 可以是周 view，也可以是列表 view；`状态完成 + 完成于本周` 可以是列表 view，也可以是周 view 用于复盘。view 不改变任务集合，只改变呈现方式、分组、排序和可用操作。
 - `US-109l` **预设 tab 可恢复，用户 tab 不被误删**。用户可以隐藏、重排或复制预设 tab，但不能把预设定义永久删到无法恢复；设置页提供“恢复默认 tabs”动作，只恢复 / 重新启用系统预设，不删除用户自定义 tabs。用户删除自定义 tab 时只删除 UI preset，不删除任何 markdown 任务；删除前要说明影响范围。
 - `US-109m` **Query Tab 身份稳定**。每个 query tab 有稳定 id；重命名、重排、隐藏不改变 id。默认 tab、最近打开 tab、快捷键目标和设置引用都使用 id 而不是显示名。若默认 tab 被隐藏或删除，打开看板时 fallback 到第一个启用 tab；如果全部 tab 被隐藏，自动恢复预设 `今日` 和 `TODO`。
 - `US-109n` **Query Tab 管理入口要可发现**。每个 tab 右侧或 hover 时有轻量“更多”菜单；桌面右键 tab 打开同一个菜单；移动端长按 tab 或在“更多 tabs”sheet 里打开同一个菜单。菜单项至少包括：重命名、复制、编辑 query、设为默认、移动到左/右、隐藏、删除（仅用户自定义 tab）、恢复预设（仅隐藏的预设入口处）。这些动作只改 UI preset，不改 markdown 任务。
+- `US-109n1` **管理 tab 与编辑 query 必须闭环在同一处**。用户从 tab 菜单进入“编辑 query”时，看到的就是这个 tab 自己的 `filters / view / summary`；从 query 编辑面板里也必须能完成与这个 tab 相关的主要管理动作：更新当前 tab、另存为新 tab、重命名、复制、隐藏/删除（若合法）、设为默认。不能把“tab 管理”放一处、“query 编辑”放另一处、两边还各自维护状态，导致用户不知道自己到底在编辑哪一个对象。
+- `US-109n2` **设置页不是 Query Tab 的主工作区**。日常的 tab 管理与 query 编辑必须发生在 Task Center 主界面内：tab strip / tab 菜单 / query 编辑面板。设置页只承载全局偏好与恢复动作，例如默认 tab、启动时自动打开、周起始日、恢复默认预设 tabs；不能要求用户去设置页完成日常的重命名、复制、更新、另存为、排序或编辑 query。
+- `US-109n3` **Query Tab 的 CRUD 必须在主界面闭环**。主界面必须让用户完成完整的增删改查：`Create` = 新建 tab / 另存为新 tab；`Read` = 打开 tab / 查看当前 query / 打开 DSL；`Update` = 更新当前 tab、重命名、复制、排序、设默认、隐藏；`Delete` = 删除自定义 tab、恢复预设 tab。设置页可以作为全局恢复与默认值入口，但不能只放半套管理按钮，导致用户还得回主界面补剩余动作。
 - `US-109o` **重命名 tab 要顺手但不只靠双击**。桌面双击 tab label 进入 inline rename；菜单里的“重命名”进入同一状态；移动端在 bottom sheet 中编辑名称。Enter 保存，Esc 取消；IME composition 期间 Enter 不提交（同 US-413）。名称不能为空；复制 tab 时默认追加本地化后缀（如“副本”）避免一眼看不出哪个是哪个。显示名只是 UI 字符串，允许用户写任意语言和符号，不影响 query id。
 - `US-109p` **编辑 query 是一个可理解的配置面板**。用户点“编辑 query”后看到当前 tab 的 `filters / view / summary` 三块：filters 负责集合，view 负责布局与 sections / buckets / axis / sort，summary 负责统计。用户可以从当前 tab 复制出新 tab，也可以把临时改动更新回当前 tab。view 配置里的 section / bucket / axis 名称和匹配条件完全由用户 DIY；应用不提供不可编辑的业务分类。
+- `US-109p1` **可视化编辑器与 DSL 序列化必须一一对应**。如果用户在 UI 里选了 `tag=#alpha + status=todo + scheduled=week + view=month + summary=sum(actual)`，系统必须能无损保存 / 恢复成同一个 query 配置；不能出现“UI 能点出来，但底层存不下”或“导入的配置在 UI 里无法回显”的双轨模型。未来若开放导入 / 导出 query preset，格式也应直接基于这份 DSL，而不是另造一层转换格式。
+- `US-109p2` **同一个 query 必须有两种编辑入口：可视化编辑与 DSL 直编**。普通用户可以通过 filters / view / summary 的图形控件编辑当前 tab；高级用户也可以打开“编辑 DSL”直接看和改这份 query 的文本表示。两种入口编辑的是同一个 tab draft，不是两套配置，不允许出现“可视化改了一份、DSL 又是另一份”的分叉。
+- `US-109p3` **DSL 直编要可校验、可回显、可回退**。用户在 DSL 编辑器里粘贴或修改 query 文本后，系统必须在保存前校验语法与字段语义；报错时指出是 `filters / view / summary` 的哪一段有问题，且不破坏当前已保存版本。校验通过后，可视化编辑器必须能完整回显这份 DSL；用户也可以放弃这次 DSL 改动，回到当前 tab 的已保存版本。
+- `US-109p4` **可视化编辑器不是唯一入口，但应是默认入口**。默认打开的是“编辑 Query”面板，而不是一个名为“过滤 / 视图”的模糊入口。这个面板先展示可视化编辑；“编辑 DSL”作为高级入口出现在同一面板内，而不是藏到设置页深处。这样新手先用图形化，进阶用户再直接改 DSL。
+- `US-109p5` **Query 编辑入口名必须和对象语义一致**。如果一个入口打开的是当前 tab 的整份 query 编辑器，它的命名就应该是“编辑 Query / 编辑当前 Tab”等对象名，而不是只叫“过滤”“视图”或“Tabs”。只有当入口真的只编辑某一个分区时，才允许用该分区名命名。
 - `US-109q` **Tab 排序与溢出要适合长期使用**。桌面可拖拽 tab 改顺序，也可用菜单“左移 / 右移”；移动端在 tabs sheet 里进入排序模式。顶部空间不足时，多余 tab 收进“更多”入口，但仍是一等 tab：badge、当前选中态、快捷键顺序和默认 tab 设置都按用户排序工作。`Ctrl/Cmd+1~9` 只切顶部可见前 9 个 tab；更多 tab 通过菜单或搜索切换。
 - `US-109r` **隐藏 / 删除 / 恢复必须低风险**。隐藏 tab 不删除配置，只是不在顶部显示；删除只允许用户自定义 tab，且删除前说明“只删除这个视图，不删除任何任务”。删除后提供一次 toast undo。预设 tab 被隐藏后可在“管理 tabs”里恢复；用户自定义 tab 删除后若 toast undo 过期，不要求长期回收站。
 - `US-109s` **未保存改动要有温和提示**。当用户临时改了当前 tab 的 filters / view / summary，tab label 或工具条显示轻量 dirty 标记；切到别的 tab 时保留临时改动在当前 tab 上下文里，不静默丢失。用户可选择“更新当前 tab”“另存为新 tab”“放弃改动”。关闭 Task Center 前如仍有未保存改动，不弹阻塞确认，但下次打开同一 tab 时应恢复临时状态或明确提示已回到已保存版本，不能悄悄表现成已保存。
+- `US-109s1` **“无过滤 / 当前 query”这类伪入口不能与 tab 平级存在**。如果 UI 需要一个“回到已保存版本”动作，它表达的是“丢弃当前 tab 的 draft，回到该 tab 的已保存 query”，而不是切换到另一个名为“当前 query”的对象。若出现下拉 / picker，第一个选项也应是“当前 tab（已保存版本）”或等价语义，而不是制造一个新的 query 身份。
 - `US-110` 设置「启动时自动开看板」开关，默认关。
 - `US-111` 设置「默认 tab」，候选来自当前启用的预设 tab + 用户自定义 query tab，决定首次打开停在哪。
 - `US-112` 设置「周一/周日为一周第一天」，影响周 view 列序、移动端 row 顺序与本周边界。
@@ -97,8 +213,8 @@
 - `US-114` 桌面拖拽过程中悬停在另一个 tab 上一会儿，自动切到那个 query tab；如果目标 tab 的 view 提供明确日期目标，松手即可跨 query 改期。移动端不提供拖拽 / dwell，跨视图动作走 US-507 的显式操作路径。
 - `US-115` deadline 已过的卡显红色 (overdue)、3 天内显黄色 (near-deadline)，眼睛能扫到。
 - `US-116` 周 view 每天显示「N tasks · XhYm」(任务数 + 估时合计)，看一眼就知道当天满不满。桌面显示在每个日期列顶部；移动端显示在每个日期 row header。两端的 N / XhYm 必须按同一套任务集合计算。
-- `US-117` 筛选栏、view 选择与 query tab 要能承载长期使用：预设 tab、用户 tab、临时改动三者分清。用户切换 query tab 后可以继续临时改 filter / view / summary；query 上下文必须保留，因此主按钮变成“更新”并覆盖当前 query，同时提供“另存为新 tab”。只有处在临时查询上下文时，主按钮才是“保存为 tab”并创建新 query。移动端不能把桌面完整筛选栏塞进首屏，只保留一个“筛选 / 视图”入口；这个入口打开 bottom sheet，里面仍按 US-109a 展示搜索 / 标签 / 排期 / 更多时间 / 状态 / view / summary 等明确控件，标签选择同样使用搜索 + 自绘 checkbox 列表，不使用原生多选 select。
-- `US-118` 设置页只保留仍有用户故事支撑的项；无故事支撑、已经被删除功能依赖的设置必须移除或隐藏。删除设置项时不能破坏旧 `data.json` 读取：旧字段可以被忽略,但不能让插件启动失败。
+- `US-117` 筛选栏、view 选择与 query tab 要能承载长期使用：预设 tab、用户 tab、临时改动三者分清。用户切换 query tab 后可以继续临时改 filter / view / summary；query 上下文必须保留，因此主按钮变成“更新”并覆盖当前 query，同时提供“另存为新 tab”。只有处在临时查询上下文时，主按钮才是“保存为 tab”并创建新 query。移动端不能把桌面完整筛选栏塞进首屏，只保留一个“编辑 Query”入口；这个入口打开 bottom sheet。V1 的可视化编辑先覆盖搜索 / 标签 / 排期 / 更多时间 / 状态这些高频 filters，完整 query 的 view / summary 继续通过同面板内的 DSL 入口落地；不允许再把整个入口误命名成“过滤 / 视图”。
+- `US-118` 设置页只保留仍有用户故事支撑的项；无故事支撑、已经被删除功能依赖的设置必须移除或隐藏。设置页承载的是全局偏好、默认值与恢复入口，不是日常 query 编辑器或 tab 管理器。删除设置项时不能破坏旧 `data.json` 读取：旧字段可以被忽略,但不能让插件启动失败。
 
 ### 桌面拖拽
 
@@ -188,6 +304,10 @@
 - `US-213` `add` 接受 `stamp-created=true|false`，覆盖全局的「自动打 ➕」设置——agent 批量回填历史任务时不污染时间戳。
 - `US-214` 当 hash 撞到多条任务，返回 `ambiguous_slug` + 候选列表，**绝不猜**(扩展 US-208 的错误码与 payload 形态)。
 - `US-215` 设置页提供 AI skill 安装指引：展示可复制的 `npx skills add CorrectRoadH/obsidian-task-center` 命令,右侧有“复制”按钮,让用户把 Task Center 的 CLI / 工作流能力安装给 AI agent 使用。该指引只是设置页帮助入口,不在移动端制造不可用的 CLI 功能。
+- `US-216` **CLI 也要能查看 query preset DSL**。除了列任务、改任务外，CLI 还必须能列出当前已有的 query tabs / presets，并查看某个 preset 的完整 DSL，方便 agent / 高级用户审计“这个 tab 到底筛了什么、怎么展示、怎么汇总”。
+- `US-217` **CLI 也要能创建与更新 query preset DSL**。用户或 agent 可以通过 CLI 新建 query tab，或用一份 DSL 覆盖更新某个已有 tab；这和 GUI 里的“保存为 tab / 更新当前 tab”是同一语义，不是另一套存储。CLI 可以走文件、stdin 或参数引用 DSL，但落盘后的对象必须与 GUI 读到的是同一份 preset。
+- `US-218` **CLI 也要能管理 query tab 元数据**。用户或 agent 可以通过 CLI 重命名、复制、隐藏、删除、设为默认某个 query tab；这些动作管理的是 tab preset，不改任何 markdown 任务。CLI 侧同样必须使用稳定 id，而不是依赖显示名猜测目标。
+- `US-219` **CLI 管理 DSL 与 GUI 编辑 DSL 必须共用同一份 schema 与校验规则**。如果某份 DSL 在 GUI 中合法，CLI 导入 / 更新也必须合法；如果 CLI 报某个字段无效，GUI 也应该给出同类错误，而不是一边能存一边不能存。不能出现“CLI 能写入 GUI 看不懂”或“GUI 能保存 CLI 解析不了”的双轨实现。
 
 ---
 

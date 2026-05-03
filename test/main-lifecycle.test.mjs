@@ -76,7 +76,20 @@ async function compile() {
               case "./settings":
                 return stubModule("export class TaskCenterSettingTab { constructor(app, plugin) { this.app = app; this.plugin = plugin; } }");
               case "./view":
-                return stubModule("export class TaskCenterView { constructor(leaf, plugin) { this.leaf = leaf; this.plugin = plugin; } }");
+                return stubModule(`
+                  export class TaskCenterView {
+                    constructor(leaf, plugin) {
+                      this.leaf = leaf;
+                      this.plugin = plugin;
+                      this.__openManageTabsCalls = 0;
+                    }
+                    openManageTabs() {
+                      this.__openManageTabsCalls++;
+                    }
+                    async reloadTasks() {}
+                    render() {}
+                  }
+                `);
               case "./cli":
                 return stubModule(`
                   export class TaskCenterApi { constructor(app, cache) { this.app = app; this.cache = cache; } }
@@ -127,6 +140,7 @@ function makeAppWithExistingTaskCenterView() {
       on(event, callback) {
         return { event, callback };
       },
+      revealLeaf() {},
       getLeavesOfType() {
         return [];
       },
@@ -157,6 +171,42 @@ function installDevReloadFlag(value) {
       globalThis.window = originalWindow;
     }
   };
+}
+
+async function createPluginForQueryCli(overrides = {}) {
+  await compile();
+  const { default: TaskCenterPlugin } = await import(`../${compiledPath}?t=${Date.now()}-${Math.random()}`);
+  const app = makeAppWithExistingTaskCenterView();
+  app.__viewCreators.clear();
+  const plugin = new TaskCenterPlugin(app);
+  const calls = { save: 0, refresh: 0 };
+  plugin.settings = {
+    savedViews: [],
+    defaultSavedViewId: null,
+    lastSavedViewId: null,
+    groupingTags: [],
+    ...overrides,
+  };
+  plugin.saveSettings = async () => {
+    calls.save++;
+  };
+  plugin.refreshOpenViews = async () => {
+    calls.refresh++;
+  };
+  return { plugin, calls };
+}
+
+function withDeterministicSavedViewId(fn) {
+  const originalNow = Date.now;
+  const originalRandom = Math.random;
+  Date.now = () => 1714764600000;
+  Math.random = () => 0.123456789;
+  return Promise.resolve()
+    .then(fn)
+    .finally(() => {
+      Date.now = originalNow;
+      Math.random = originalRandom;
+    });
 }
 
 test("plugin onload rejects duplicate view registration in the production path", async () => {
@@ -235,4 +285,280 @@ test("CLI write handlers rely on cache events instead of directly refreshing ope
 
   await plugin.cliDone({ ref: "Tasks/Inbox.md:L1" });
   assert.equal(refreshCalls, 0, "CLI writes should not force an immediate view render");
+});
+
+test("loadSettings seeds built-in query tabs and migrates legacy defaultView/lastTab to saved-view ids", async () => {
+  await compile();
+  const { default: TaskCenterPlugin } = await import(`../${compiledPath}?t=${Date.now()}-${Math.random()}`);
+  const app = makeAppWithExistingTaskCenterView();
+  app.__viewCreators.clear();
+  const plugin = new TaskCenterPlugin(app);
+  plugin.loadData = async () => ({
+    savedViews: [
+      {
+        id: "sv-custom",
+        name: "Custom",
+        search: "docs",
+        tag: "#work",
+        time: {},
+        status: ["todo"],
+        view: { type: "list" },
+        summary: [],
+      },
+    ],
+    defaultView: "month",
+    lastTab: "completed",
+  });
+
+  await plugin.loadSettings();
+
+  assert.deepEqual(plugin.settings.savedViews.slice(0, 5).map((view) => view.id), [
+    "preset-today",
+    "preset-week",
+    "preset-month",
+    "preset-completed",
+    "preset-unscheduled",
+  ]);
+  assert.equal(plugin.settings.defaultSavedViewId, "preset-month");
+  assert.equal(plugin.settings.lastSavedViewId, "preset-completed");
+});
+
+test("query-list 默认隐藏 hidden preset，format=json 会带出 default/hidden 元数据", async () => {
+  const { plugin } = await createPluginForQueryCli({
+    defaultSavedViewId: "sv-alpha",
+    savedViews: [
+      {
+        id: "sv-alpha",
+        name: "Alpha",
+        search: "focus",
+        tag: "#alpha",
+        time: {},
+        status: ["todo"],
+        view: { type: "list" },
+        summary: [],
+      },
+      {
+        id: "sv-beta",
+        name: "Beta",
+        hidden: true,
+        search: "",
+        tag: "#beta",
+        time: {},
+        status: "all",
+        view: { type: "month" },
+        summary: [],
+      },
+    ],
+  });
+
+  const text = await plugin.cliQueryList({});
+  assert.match(text, /^1 query presets/m);
+  assert.match(text, /sv-alpha  Alpha  default · visible/);
+  assert.doesNotMatch(text, /sv-beta/);
+
+  const json = JSON.parse(await plugin.cliQueryList({ hidden: "true", format: "json" }));
+  assert.deepEqual(json, [
+    { id: "sv-alpha", name: "Alpha", hidden: false, default: true },
+    { id: "sv-beta", name: "Beta", hidden: true, default: false },
+  ]);
+});
+
+test("query-show 返回当前 preset 的 DSL JSON", async () => {
+  const { plugin } = await createPluginForQueryCli({
+    savedViews: [
+      {
+        id: "sv-alpha",
+        name: "Alpha",
+        search: "deep work",
+        tag: "#alpha,#beta",
+        time: { scheduled: "week" },
+        status: ["todo", "done"],
+        view: { type: "month", preset: "today" },
+        summary: [{ type: "count" }],
+      },
+    ],
+  });
+
+  const shown = JSON.parse(await plugin.cliQueryShow({ id: "sv-alpha" }));
+  assert.deepEqual(shown, {
+    id: "sv-alpha",
+    name: "Alpha",
+    filters: {
+      search: "deep work",
+      tags: ["#alpha", "#beta"],
+      status: ["todo", "done"],
+      time: { scheduled: "week" },
+    },
+    view: { type: "month", preset: "today" },
+    summary: [{ type: "count" }],
+  });
+});
+
+test("query-save 总是新建 preset id，而不是复用 DSL 里的 id", async () => {
+  const { plugin, calls } = await createPluginForQueryCli();
+
+  await withDeterministicSavedViewId(async () => {
+    const result = await plugin.cliQuerySave({
+      dsl: JSON.stringify({
+        id: "sv-from-dsl",
+        name: " Deep Work ",
+        filters: {
+          search: " docs ",
+          tags: ["alpha"],
+          status: ["todo"],
+        },
+        view: { type: "week" },
+        summary: [{ type: "count" }],
+      }),
+    });
+
+    assert.match(result, /^ok  sv-/);
+    assert.match(result, /saved query preset/);
+  });
+
+  assert.equal(plugin.settings.savedViews.length, 1);
+  const createdId = plugin.settings.savedViews[0].id;
+  assert.match(createdId, /^sv-[a-z0-9]+-4fzz$/);
+  assert.equal(createdId === "sv-from-dsl", false);
+  assert.equal(plugin.settings.savedViews[0].name, "Deep Work");
+  assert.equal(plugin.settings.savedViews[0].search, "docs");
+  assert.deepEqual(plugin.settings.savedViews[0].status, ["todo"]);
+  assert.deepEqual(plugin.settings.savedViews[0].view, { type: "week" });
+  assert.equal(calls.save, 1);
+  assert.equal(calls.refresh, 1);
+});
+
+test("query-update 固定覆盖当前 id，不允许 DSL 偷换 preset 身份", async () => {
+  const { plugin, calls } = await createPluginForQueryCli({
+    savedViews: [
+      {
+        id: "sv-alpha",
+        name: "Alpha",
+        search: "old",
+        tag: "#alpha",
+        time: {},
+        status: ["todo"],
+        view: { type: "list" },
+        summary: [],
+      },
+    ],
+  });
+
+  const result = await plugin.cliQueryUpdate({
+    id: "sv-alpha",
+    dsl: JSON.stringify({
+      id: "sv-should-not-win",
+      name: "Alpha Updated",
+      filters: {
+        search: "new",
+        tags: ["#beta"],
+        status: ["done"],
+        time: { completed: "month" },
+      },
+      view: { type: "month", preset: "completed" },
+      summary: [{ type: "sum", field: "actual", format: "duration" }],
+    }),
+  });
+
+  assert.match(result, /^ok  sv-alpha  Alpha Updated/);
+  assert.deepEqual(plugin.settings.savedViews, [
+    {
+      id: "sv-alpha",
+      name: "Alpha Updated",
+      builtin: false,
+      hidden: false,
+      search: "new",
+      tag: "#beta",
+      time: { completed: "month" },
+      status: ["done"],
+      view: { type: "month", preset: "completed" },
+      summary: [{ type: "sum", field: "actual", format: "duration" }],
+    },
+  ]);
+  assert.equal(calls.save, 1);
+  assert.equal(calls.refresh, 1);
+});
+
+test("query-copy / hide / set-default / delete 维护 preset 生命周期与默认指针", async () => {
+  const { plugin, calls } = await createPluginForQueryCli({
+    defaultSavedViewId: "sv-alpha",
+    lastSavedViewId: "sv-alpha",
+    savedViews: [
+      {
+        id: "sv-alpha",
+        name: "Alpha",
+        search: "focus",
+        tag: "#alpha",
+        time: {},
+        status: ["todo"],
+        view: { type: "list" },
+        summary: [],
+      },
+    ],
+  });
+
+  await withDeterministicSavedViewId(async () => {
+    const copied = await plugin.cliQueryCopy({ id: "sv-alpha", name: "Alpha Copy" });
+    assert.match(copied, /^ok  sv-[a-z0-9]+-4fzz  Alpha Copy/);
+  });
+
+  assert.equal(plugin.settings.savedViews.length, 2);
+  const copiedId = plugin.settings.savedViews.find((view) => view.name === "Alpha Copy")?.id;
+  assert.match(copiedId, /^sv-[a-z0-9]+-4fzz$/);
+
+  const hidden = await plugin.cliQueryHide({ id: "sv-alpha", hidden: "true" });
+  assert.match(hidden, /hidden query preset/);
+  assert.equal(plugin.settings.defaultSavedViewId, null);
+  assert.equal(plugin.settings.lastSavedViewId, null);
+  assert.equal(plugin.settings.savedViews.find((view) => view.id === "sv-alpha")?.hidden, true);
+
+  await assert.rejects(
+    () => plugin.cliQuerySetDefault({ id: "sv-alpha" }),
+    /invalid_query/,
+  );
+
+  const setDefault = await plugin.cliQuerySetDefault({ id: copiedId });
+  assert.match(setDefault, /set as default query preset/);
+  assert.equal(plugin.settings.defaultSavedViewId, copiedId);
+
+  const cleared = await plugin.cliQuerySetDefault({ id: "null" });
+  assert.match(cleared, /default-query-preset/);
+  assert.equal(plugin.settings.defaultSavedViewId, null);
+
+  const deleted = await plugin.cliQueryDelete({ id: copiedId });
+  assert.match(deleted, /deleted query preset/);
+  assert.deepEqual(plugin.settings.savedViews, [
+    {
+      id: "sv-alpha",
+      name: "Alpha",
+      builtin: false,
+      hidden: true,
+      search: "focus",
+      tag: "#alpha",
+      time: {},
+      status: ["todo"],
+      view: { type: "list" },
+      summary: [],
+    },
+  ]);
+  assert.equal(calls.save, 5);
+  assert.equal(calls.refresh, 3);
+});
+
+test("openManageTabs 会激活 Task Center 并打开主界面的 Tabs 管理器", async () => {
+  await compile();
+  const { default: TaskCenterPlugin } = await import(`../${compiledPath}?t=${Date.now()}-${Math.random()}`);
+  const app = makeAppWithExistingTaskCenterView();
+  app.__viewCreators.clear();
+  const plugin = new TaskCenterPlugin(app);
+  await plugin.onload();
+
+  const leaf = {};
+  const creator = app.__viewCreators.get("task-center-board");
+  leaf.view = creator(leaf);
+  app.workspace.getLeavesOfType = () => [leaf];
+
+  await plugin.openManageTabs();
+
+  assert.equal(leaf.view.__openManageTabsCalls, 1);
 });

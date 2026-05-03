@@ -36,28 +36,56 @@
 
 ## 2. 信息架构（IA）
 
+Task Center 的可配置核心是**一份 query DSL**，而不是几组彼此独立的 UI 状态。用户在工具条里点搜索、标签、排期、状态、view、summary，本质上都是在编辑同一个声明式对象：
+
+```yaml
+query:
+  id: stable-id
+  name: 可显示名称
+  filters: ...
+  view: ...
+  summary: ...
+```
+
+多数用户不会直接手写 DSL；他们面对的是图形化编辑器。但 UX 必须保证：界面上每个控件都有明确的 DSL 落点，反过来每个已保存的 query preset 也都能被界面无损回显。
+
+同一个 query 编辑面板内要同时容纳两种入口：
+
+- 可视化编辑：默认入口，按 `filters / view / summary` 分块配置
+- DSL 直编：高级入口，直接查看和修改同一份 query 的文本表示
+
+两者编辑的是同一个 tab draft；切换入口不会切换对象。
+
+同时，UI 里不应再出现一个和 tab 平行的一等“当前 query”对象。这里的运行时关系只有三层：
+
+- `tab`：持久化 query preset
+- `draft`：挂在该 tab 上的未保存改动
+- `effective query`：当前激活 tab 的已保存配置加上 draft 覆盖后的实际生效结果
+
+所以用户体验上始终是在“编辑当前 tab 的 query”，不是在 tab 外再切一个“当前 query”。
+
 ```
 Task Center 主视图
-├─ 顶部 tab 栏：今日 / 周 / 月 / 已完成 / 未排期 ← 5 个 tab，每个带未读小圆点  (US-105 / US-166 / US-720)
+├─ 顶部 Query Tab 栏：预设 tab + 用户自定义 tab，每个带数量 badge  (US-105 / US-109g / US-166)
 ├─ 工具条：
-│   ├─ 筛选输入框（`/` 聚焦）                  (US-109 / US-166)
-│   ├─ 快速添加按钮 `+ Add`                     (US-163)
-│   └─ 视图相关切换（周视图：上一周 / 今 / 下一周；月视图同理） (US-101 / US-102)
-├─ 主区
-│   ├─ 今日 tab：逾期 / 今日 / 未排期推荐三组
-│   ├─ 周 tab：7 列 Mon~Sun（或 Sun~Sat，跟设置）
-│   ├─ 月 tab：日历 6×7
-│   ├─ 已完成 tab：按周分组的时间线
-│   └─ 未排期 tab：按优先排序展示未排期任务
-├─ 未排期池（仅周 / 月 tab 显示，主区下方常驻）  (US-104)
-└─ 底部固定的放弃目标区                         (US-123)
+│   ├─ 搜索 / 标签 / 排期 / 更多时间 / 状态 filters                 (US-109)
+│   ├─ View 选择与配置：list / week / month / matrix                 (US-100 / US-117)
+│   ├─ Summary 配置与当前 query 摘要                                 (US-109 / US-302 / US-303)
+│   ├─ 保存 / 更新 / 另存为新 tab / 放弃改动                          (US-109c / US-117)
+│   └─ 快速添加按钮 `+ Add`                                          (US-163)
+├─ 主区：当前 query 的 view 输出
+│   ├─ list view：可选 sections，例如今日预设的逾期 / 今日 / 未排期推荐
+│   ├─ week view：7 列 Mon~Sun（或 Sun~Sat，跟设置）
+│   ├─ month view：日历 6×7
+│   └─ matrix view：用户配置的二维 buckets
+└─ 底部固定的放弃目标区                                               (US-123)
 
 状态栏右下：📋 N today · ⚠ M overdue            (US-106)
 ```
 
-**Tab 切换不重置**视图状态：周视图当前周、月视图当前月、筛选关键字、滚动位置都按 tab 各自记忆。关闭看板时记最后停留的 tab，下次打开回到那一个（US-405）。
+**Tab 切换不重置** query 状态：week 当前周、month 当前月、list 滚动位置、matrix 折叠 / 滚动、临时筛选关键字都按 tab 各自记忆。关闭看板时记最后停留的 query tab，下次打开回到那一个（US-405）。
 
-**首次打开**走"默认 tab"设置（US-111），默认 = 周。
+**首次打开**走"默认 tab"设置（US-111），候选来自启用中的预设 tab + 用户自定义 tab。
 
 ---
 
@@ -65,10 +93,10 @@ Task Center 主视图
 
 ```
 ┌──────────────────────────────────────────────────────────────────────┐
-│  今日·M 周·M 月·M 已完成·M 未排期·M  🔎 [搜索任务...] [#不重要 +1] [排期] [状态] [< 今 >] + Add │
+│  今日·M 本周·M 我的优先级·M 已完成·M  🔎 [搜索任务...] [标签] [排期] [状态] [View] [更新] + Add │
 ├──────────────────────────────────────────────────────────────────────┤
 │                                                                      │
-│  Mon 4-21    Tue 4-22    Wed 4-23   Thu 今 4-24   Fri 4-25  ...      │  ← 当前 tab 主区
+│  Mon 4-21    Tue 4-22    Wed 4-23   Thu 今 4-24   Fri 4-25  ...      │  ← 当前 query 使用 week view
 │  3 · 2h45m   1 · 30m     4 · 5h      ── 高亮 ──   2 · 1h30m          │    顶部一行 N tasks · XhYm (US-116)
 │                                                                      │
 │  ┌────┐      ┌────┐      ┌────┐      ┌────┐       ┌────┐             │
@@ -76,33 +104,56 @@ Task Center 主视图
 │  └────┘      └────┘      └────┘      └────┘       └────┘             │
 │                                                                      │
 ├──────────────────────────────────────────────────────────────────────┤
-│  未排期池 · 先 deadline，再按加入时间排序                              │  ← 仅周 / 月 tab 出现
-│                                                                      │
-│  [卡片]  [卡片]  [卡片]  ...                                           │
-├──────────────────────────────────────────────────────────────────────┤
 │                            ⏹ 拖到这里 = 放弃                          │  ← 底部 sticky (US-123)
 └──────────────────────────────────────────────────────────────────────┘
 ```
 
-- **未排期池**只在周 / 月 tab 显示——核心动作是从未排期池拖到某天。已完成 tab 不需要它，未排期 tab 本身就是它的扩展形态。
+- **未排期**只是 `time.scheduled is empty` filter，不是常驻池。用户要从未排期任务改期，可以切到“未排期”query tab，再通过动作菜单或桌面跨 tab / 日期 drop 路径改期（US-104 / US-114 / US-121）。
 - **放弃目标区**始终 sticky 在底部，所有 tab 可见。可见 UI 不使用“垃圾桶/删除”文案或 trash 图标，避免用户误会为删除文件内容（US-123）。
-- 主区与未排期池间用一条 1px Obsidian `--background-modifier-border` 分隔，不要用大色块。
+- **桌面底部辅助区对齐**：当某个桌面 query 在主区下方同时呈现“未排期区”和“放弃目标区”时，两者必须落在同一套内容对齐线里。放弃区要与上方主内容、未排期区共用左边界与可读宽度，视觉上是同一列体系里的下方区块，不能实现成右侧孤立的窄栏。
 
 ---
 
-## 4. 各 Tab 规格
+## 4. View 与预设 Query 规格
 
-### 4.0 今日执行视图
+### 4.0 今日预设 Query（list view）
 
-- **入口**：顶部第一个 tab，`data-tab="today"`；切入后主区为 `data-view="today"`（US-720a）。
-- **目标问题**：只回答“今天先做什么”，不复刻完整周/月看板。
-- **三组**：逾期 `data-today-group="overdue"`、今日安排 `data-today-group="today"`、未排期推荐 `data-today-group="unscheduled-rec"`；每组最多 3 条，卡片显示标题、来源路径提示、日期/估时信息（US-720b）。
+- **入口**：预设 query tab，`data-tab="today"`；语义上它是 `view.type = list` 的一个 preset。为兼容现有 e2e / DOM 契约，容器可继续保留 `data-view="today"`，但实现语义必须等价于 `data-preset="today"` 的 list query，而不是新增一个通用 view 类型（US-720a）。
+- **目标问题**：默认回答“今天先做什么”，但它只是可复制 / 可编辑的 query preset，不是独立 view 类型，也不是固定方法论。
+- **默认 sections**：逾期 `data-section="overdue"`、今日安排 `data-section="today"`、未排期推荐 `data-section="unscheduled-rec"`；每组最多 3 条，卡片显示标题、来源路径提示、日期/估时信息（US-720b）。用户复制该 query 后可以改 section 标题、条件、数量、顺序。
 - **快捷动作**：每张卡至少有“完成”“改到明天”“放弃”；“改到明天”按钮提供 `data-action="reschedule-tomorrow"`，写入 `⏳ <tomorrow>` 并走现有 writer 路径（US-720c）。
 - **空状态**：三组均空时显示 `data-today-empty`，文案居中，不出现空白页面（US-720d）。
-- **首屏视觉中心**：空状态在主区视觉居中；有任务时，三组列表顶部保留稳定上边距，不能贴着工具条第一行堆叠（US-720e）。
+- **首屏视觉中心**：空状态在主区视觉居中；有任务时，sections 顶部保留稳定上边距，不能贴着工具条第一行堆叠（US-720e）。
 - **不做**：今日计划模式 / 选一批未排期任务批量排程已从 USER_STORIES 删除，不保留独立 `plan-today` surface。
 
-### 4.1 周视图
+默认 DSL 形态：
+
+```yaml
+id: preset-today
+name: 今日
+filters:
+  status: [todo]
+view:
+  type: list
+  preset: today
+  sections:
+    - id: overdue
+      title: 逾期
+      when: deadline < today
+      limit: 3
+    - id: today
+      title: 今日
+      when: scheduled == today
+      limit: 3
+    - id: unscheduled-rec
+      title: 未排期推荐
+      when: scheduled is empty
+      order_by: [deadline_risk, created_desc]
+      limit: 3
+summary: []
+```
+
+### 4.1 Week View
 
 - **列序**：跟设置（周一为首 / 周日为首，US-112）。共 7 列。
 - **今日列**：背景 = `--background-secondary-alt`，列头加点强调色 dot（不要整列染色）。
@@ -112,27 +163,29 @@ Task Center 主视图
 - **拖入目标**：每一列的整片列体都是 drop zone，不只是已有卡片之间的缝。
 - **空列**：列体显示轻量空状态，仍作为该日期的 drop zone；不额外制造新建任务入口，新增任务主路径仍是 Quick Add（US-169）。
 
-### 4.2 月视图
+### 4.2 Month View
 
 - **形态**：6 行 × 7 列日历（US-102）。月初 / 月末灰显非本月日期。
 - **每格**：日期数字 + 最多 3 张卡片缩略；超出显示 `+N more`，点开弹该日任务列表。`+N more` 本身也是该日期的 drop surface（US-122）。
 - **每格也是 drop target**（US-122）。
 - **拖到 `+N more`**直接落在该天，不需要先展开。
+- **与底部辅助区的版式关系**：如果月 view 下方出现未排期区 / 放弃区，这两个区块必须延续月历主体的左对齐线与内容宽度；放弃区不是月历右侧的附属侧栏，而是主内容流中的底部区块。
 
-### 4.3 已完成视图
+### 4.3 List View
 
-- **形态**：按周分组的时间线，最新一周在顶。
-- **每周组顶**：`第 N 周 · YYYY-MM-DD ~ YYYY-MM-DD · 准确率 sum(actual)/sum(estimate) · top tag 时长`（US-303）。
-- **历史周默认折叠**，本周展开（US-304）。展开 = 点周组头任意位置或 `►` 图标。
-- **卡形态**：和别处一致；右上 `✅ MM-DD` 戳；如果存在用户配置的实际耗时字段，则与计划耗时字段并列显示，色调暗淡。
-- **`[-] ❌`（放弃）的任务**显示在**单独的 "放弃" 子分组**里（US-305），不混进完成里。
-- **筛选**：复用主筛选输入框，可以按 tag / 关键字过滤完成历史。
+- **形态**：连续列表，可配置 sections。默认可不分段；也可按日期、文件、tag bucket、用户定义规则分段（US-103）。
+- **已完成 / 已放弃**：只是状态 filter + list view 的预设 query。完成历史可按完成时间倒序，放弃历史可按放弃时间倒序；二者不能混成一个状态统计（US-305）。
+- **复盘列表**：用户可以配置 summary 行，例如字段 sum / ratio / top N；字段名、误差带、时间范围、拆分维度都来自用户配置（US-303）。
+- **未排期**：只是 `time.scheduled is empty` filter + list view 的预设 query；默认排序按 US-104。
+- **tag / field 分段**：列表 view 的 section 配置允许用户用任意 tag / inline field DIY，不内置任何方法论或固定分类。
 
-### 4.4 未排期视图
+### 4.4 Matrix View
 
-- **排序**：顶部永远是 "该挑下一件的那件"（US-104）：先按 `📅 deadline` 升序，再按"加入未排期"时间升序。这条排序规则在顶部写一行说明文字（视觉上小字、灰色），让用户意识到这不是随机顺序。
-- **tag 不参与内置分组**：`#1象限`、`#now` 等都只是普通 tag。用户要按 tag 看集合时，用筛选栏标签选择器；常用组合保存成视图（US-109 / US-301）。
-- **形态**：响应式卡片流。桌面可多列，移动端单列；不引入和任务排序无关的视觉分组。
+- **形态**：二维矩阵，用户配置横轴、纵轴、bucket 名称与匹配条件（US-103a）。
+- **业务解耦**：矩阵不知道“重要/紧急”等方法论。轴名、bucket 名、匹配 tag / inline field / 状态 / 时间条件都由用户配置。
+- **未命中**：没有命中任何 bucket 的任务进入“未分组”区；空 bucket 是否显示由 view 配置决定。
+- **多命中**：同一任务命中多个 bucket 时默认放入第一个匹配 bucket；用户可显式选择允许重复显示。
+- **移动端**：优先纵向堆叠 bucket，保留矩阵语义和 bucket 标题，避免横向挤压。
 
 ---
 
@@ -364,7 +417,7 @@ Task Center 主视图
 
 | 键 | 动作 |
 | --- | --- |
-| `⌃1 / ⌃2 / ⌃3 / ⌃4 / ⌃5` | 切到 今日 / 周 / 月 / 已完成 / 未排期 |
+| `⌃1` ~ `⌃9` | 切换顶部可见前 9 个 Query Tab（按用户当前排序） |
 | `/` | 聚焦筛选输入框 |
 | `⌘/Ctrl+Z` | Undo |
 
@@ -374,20 +427,36 @@ Quick Add 还可以由 Obsidian 命令面板 / 看板 `+ Add` 按钮进入；是
 
 ### 6.9 筛选 / 搜索
 
-- 筛选栏包含明确控件，不使用一个含义泛化的“筛选”下拉：
+- 筛选栏包含明确控件，不使用一个含义泛化的“筛选”下拉；Query Tab = `filters + view + summary`：
   - 搜索框：自由关键字，在标题中匹配，子串，不区分大小写。
-  - 保存视图：按钮 + popover，不使用原生 select。默认显示“无过滤”；有保存视图时列出命名视图；空状态提示“设置过滤条件后可保存为视图”。
-  - 标签：按钮 + popover，不使用原生 `<select multiple>`。按钮默认显示“标签”，选 1 个时直接显示该 tag，选多个时显示“第一个 tag +N”；不要在按钮旁边再铺外部 tag chip。popover 顶部是搜索框，下面是自绘 checkbox 行。选项来自当前 tab / 保存视图 / 排期 / 状态等非 tag 条件下仍存在的合法 `#tag`，每项显示命中数；取消选择在 popover 内完成。
+  - Query Tab：顶部 tab strip + 更多菜单，不使用原生 select。tab 菜单支持重命名、复制、编辑 query、设为默认、移动、隐藏、删除；桌面双击 tab label 只是重命名快捷方式，不是唯一入口（US-109n~s）。用户从这里进入“编辑 query”后，编辑的就是这个 tab 自己的 query。
+  - 标签：按钮 + popover，不使用原生 `<select multiple>`。按钮默认显示“标签”，选 1 个时直接显示该 tag，选多个时显示“第一个 tag +N”；不要在按钮旁边再铺外部 tag chip。popover 顶部是搜索框，下面是自绘 checkbox 行。选项来自当前 query 中除 tag 外的其它 filter 条件下仍存在的合法 `#tag`，每项显示命中数；取消选择在 popover 内完成。
   - 排期：按钮 + 排期范围 popover，不使用原生 select，也不要求用户手输日期。桌面两栏：左侧快捷范围（全部排期、今天、明天、本周、下周、本月），右侧日历视图（月切换、星期头、日期格）。日历视图固定按范围工作：先点开始排期，再点结束排期后应用闭区间；结束早于开始时自动交换；右侧标题区提供“清空排期范围”。移动端堆叠为两列快捷范围 + 下方日历。工具栏按钮只显示紧凑范围摘要，不能撑破相邻按钮。快捷项是轻量 row/chip，不做满宽大主按钮；当前选中只用边框/浅底强调。
   - 更多时间：按钮 + popover，不使用原生 select。未设置高级时间条件时显示“更多时间”；设置了截止 / 完成于 / 创建于中任意条件后显示“时间 +N”。popover 第一层是三行：截止、完成于、创建于；每行左侧字段名，中间是当前范围摘要，右侧是清空按钮。点中间摘要进入该字段自己的范围选择器，标题必须是“截止范围 / 完成于范围 / 创建于范围”，快捷项与日历交互同排期。截止可以额外有“逾期 / 未来 7 天”快捷项；完成于 / 创建于不出现“逾期”。
   - 状态：按钮 + 轻量 popover，不使用原生 select。按钮默认显示“状态”，选项按顺序为全部、待办、完成、放弃；点击全部清空状态条件，点击待办 / 完成 / 放弃以自绘 checkbox 行多选并立即过滤，popover 保持打开方便连续选择，选中态使用同排期快捷范围一致的浅底/边框。
 - 时间字段语义必须分开：排期只筛 `⏳ scheduled`；逾期属于 `📅 deadline` 风险表达，未排期属于缺少 `⏳` 的视图 / 状态表达，完成时间和创建时间分别通过“完成于”“创建于”进入更多时间，不进入排期 popover。
 - 输入或选择后即过滤（文本输入 ≥ 300ms debounce；按钮 / popover 选择立即生效）。
 - **筛选不改文件**，只改可见集合。
-- **保存 / 更新过滤视图**只是筛选 preset：默认视图、保存视图、临时筛选三者分清。处在“无过滤”时，主按钮是“保存过滤视图”并要求命名新视图；处在某个已保存视图时，主按钮是“更新”，点击后直接覆盖当前保存视图，不再弹命名。没有任何筛选条件时按钮 disabled，不能保存或更新空 preset。移动端只露出筛选入口，完整控件在 bottom sheet 内（US-117）。
+- **保存 / 更新 Query Tab** 写入的是 `filters + view + summary` preset：预设 tab、用户 tab、临时改动三者分清。当前 tab 有未保存改动时显示轻量 dirty 标记，主按钮是“更新”，旁边提供“另存为新 tab”和“放弃改动”。这里的“放弃改动”语义是“丢弃当前 tab 的 draft，回到该 tab 已保存版本”，不是切到另一个“当前 query”。移动端只露出“编辑 Query”入口，桌面也可以用同一入口打开 query 编辑面板；不要把整个入口误命名成“筛选 / 视图”（US-117 / US-109p5 / US-109s）。
+- **动作语义必须直接可读**：`更新当前 tab` = 覆盖写回当前 tab 的已保存 preset；`另存为新 tab` = 复制当前 effective query 生成新 tab；`保存为 tab` = 仅在当前结果还没有归属 tab 时出现。不要把“保存”同时拿来表示覆盖与新建两种动作，也不要把这些动作放进设置页完成（US-109c / US-109c1 / US-109n2）。
+- **主界面的 Tabs 面板必须承担 CRUD 闭环**：`Create` = 新建 tab / 另存为新 tab；`Read` = 打开 tab / 查看当前 query / 打开 DSL；`Update` = 更新、重命名、复制、排序、设默认、隐藏；`Delete` = 删除自定义 tab、恢复预设 tab。设置页只保留全局项（默认 tab、恢复预设 tabs、启动时打开、周起始日），不再放一组半闭合的日常管理按钮（US-109n2 / US-109n3）。
+- **这些控件是 DSL 编辑器，不是平行状态机**：点击一个 tag checkbox = 改 `query.filters.tag`；切到 month = 改 `query.view.type`；配置每周汇总 = 改 `query.summary`。任何可见状态都应该能还原成一份规范化 query 对象，并从这份对象重建 UI。
+- **同面板双入口**：query 编辑面板默认展示可视化编辑；同面板里提供“编辑 DSL”切换到原始文本。V1 可视化优先覆盖高频 filters；完整 query 的 view / summary 在 dedicated 可视化控件落地前，可先通过同面板内的 DSL 入口完成。DSL 校验失败时，错误要指向具体字段段落，且不覆盖当前已保存版本；校验通过后再回到可视化编辑，控件状态必须完整回显。
 - 过滤后空集 → 显示当前条件摘要，并提供“清空筛选”动作（US-109b）。
-- 在已完成 tab 也可用，与时间筛选叠加。
-- 不提供独立“分组”下拉。所谓 Q1 / 工作 / 安全 / 计划 都是 tag 过滤 + 保存视图；如果未来要按 tag 分组渲染，需要单独故事定义列表结构变化（US-109f）。
+- 在已完成 / 已放弃等历史 query 也可用，与时间筛选叠加。
+- View 配置承载分段 / 分桶：list view 可配置 sections，matrix view 可配置 axis / buckets。应用层不内置任何业务分类；tag / field 字面只来自用户 markdown 与用户配置（US-109f / US-103a）。
+
+默认预设 tab 在 UX 上也应能解释成 DSL，而不是写死页面：
+
+```yaml
+- preset-today: { filters: { status: [todo] }, view: { type: list, preset: today }, summary: [] }
+- preset-week: { filters: { status: [todo], time: { scheduled: week } }, view: { type: week }, summary: [] }
+- preset-month: { filters: { status: [todo], time: { scheduled: month } }, view: { type: month }, summary: [] }
+- preset-todo: { filters: { status: [todo] }, view: { type: list }, summary: [] }
+- preset-unscheduled: { filters: { status: [todo], time: { scheduled: unscheduled } }, view: { type: list, order_by: [deadline_risk, created_desc] }, summary: [] }
+- preset-completed: { filters: { status: [done] }, view: { type: list, order_by: [completed_desc] }, summary: [count, sum(actual), ratio(actual,estimate)] }
+- preset-dropped: { filters: { status: [dropped] }, view: { type: list, order_by: [abandoned_desc] }, summary: [count] }
+```
 
 ### 6.10 状态栏小部件（US-106）
 
@@ -410,7 +479,7 @@ Quick Add 还可以由 Obsidian 命令面板 / 看板 `+ Add` 按钮进入；是
 | 完成 / 放弃父 | 整条分支自动完成 / 放弃，**已打钩的子原样保留** | US-124 / US-145 |
 | 父子同日创建 | 子不重复打 `➕` 戳 | US-146 |
 | 父子 `⏳` 不同日 | 子不再嵌在父卡里，而是在自己 `⏳` 对应的日期 / 视图上下文里作为独立顶层卡显示 | US-148 / US-149 |
-| 跨视图 | 子卡显示 `⏳ MM-DD` badge 仅当**子的 `⏳` ≠ 父的 `⏳`** | US-149 |
+| 跨 view | 子卡显示 `⏳ MM-DD` badge 仅当**子的 `⏳` ≠ 父的 `⏳`** | US-149 |
 
 ---
 
@@ -469,11 +538,11 @@ Quick Add 还可以由 Obsidian 命令面板 / 看板 `+ Add` 按钮进入；是
 
 | 设置 | 默认 | 说明 | 故事 |
 | --- | --- | --- | --- |
-| 默认 tab | 周 | 首次打开停在哪个 tab | US-111 |
+| 默认 tab | 当前启用 tab 中的一个 | 首次打开停在哪个 Query Tab；引用稳定 query id，不引用显示名 | US-111 / US-109m |
 | 启动时自动打开看板 | 关 | | US-110 |
 | 一周第一天 | 周一 | 影响周列序 + 本周边界 | US-112 |
 | 自动打 `➕ 创建日期` | 开 | 全局开关，CLI 可单次覆盖（US-213） | US-213 |
-| 保存视图 | 空 | 保存搜索 / tags / time / 状态 / 汇总配置 preset；time 内含排期 / 截止 / 完成于 / 创建于；切换 preset 后仍可临时改筛选，只有“保存/更新视图”写入设置；不保存独立“分组”条件 | US-109 / US-117 |
+| Tab 默认与恢复 | 预设 + 用户自定义 | 这里只放全局入口：默认 tab、恢复默认预设 tabs、必要的导入导出入口。日常的重命名、复制、更新、另存为、排序、隐藏、删除、编辑 query 都在主界面的 tab 菜单、Tabs 面板与 query 编辑面板完成 | US-109n2 / US-109n3 / US-117 |
 | AI skill 安装指引 | `npx skills add CorrectRoadH/obsidian-task-center` | 命令明文展示，右侧有复制按钮；只在设置页作为帮助入口，移动端不暴露不可用 CLI 能力 | US-215 |
 
 **版式**：用 Obsidian 原生 `Setting` 组件，不写自定义 webview。每项一行：`label · description · control`。**不**做多 tab 设置；条目少。
@@ -487,7 +556,7 @@ Quick Add 还可以由 Obsidian 命令面板 / 看板 `+ Add` 按钮进入；是
 - **UI 字符串跟随 Obsidian 当前语言**自动切换 zh-CN / en；不暴露插件级语言开关，不要求重启 / 重开看板（实时重渲染）。
 - 字符串集中在 `i18n/{zh-CN,en}.ts`（具体文件位置在 ARCHITECTURE.md 决定）。
 - **数据字面绝不翻译**。这条是数据兼容硬约束（US-401 / US-407 / US-409）：
-  - 用户写在 markdown 里的 **合法 hashtag 字面**（无论是 `#1象限` `#now` `#A` `#项目X` 还是其他）—— 原样保留，原样匹配，原样写回；未识别为合法 hashtag 的 `#...` 片段也原样保留，只是不进入筛选候选。
+  - 用户写在 markdown 里的 **合法 hashtag 字面**（无论是 `#A` `#项目X` 还是其他）—— 原样保留，原样匹配，原样写回；未识别为合法 hashtag 的 `#...` 片段也原样保留，只是不进入筛选候选。
   - 用户写在 markdown 里的 **inline field 字段名**（`[estimate::]` `[planned::]` `[花了::]` ...）—— 同上。
   - **emoji 字段标记**（`⏳ / 📅 / ✅ / ❌ / ➕ / 🛫 / 🔁 / 🔺⏫🔼🔽⏬`）—— 这是 Obsidian Tasks 的字面字段标记，不是装饰，绝不翻译 / 替换。
 - **应用层文案可以本地化**：tab 名、列头、按钮、设置项 label / description、空状态、toast、错误信息的"一句人话"部分。这些是**应用提供的字符串**，不是用户数据。
@@ -569,6 +638,8 @@ ARCHITECTURE 决定具体实现，UX 这里只定**用户能感受到什么**：
 
 `task-center:*` 注册到 Obsidian 原生 CLI（US-201）。**不**写独立二进制、**不**走 shell wrapper。
 
+CLI 不只管 task 动词，也要能查看和管理 query preset DSL：至少支持列出 preset、查看 preset DSL、创建/更新 preset DSL、重命名/复制/隐藏/删除/设默认。CLI 与 GUI 共用同一份 schema 与校验规则。
+
 ### 14.2 输出形态规范（必须）
 
 1. **第一列恒为稳定 id**（US-202）：`path:Lnnn` 或 12-char hex hash。
@@ -639,7 +710,7 @@ error <code>  <一句人话>
 - 通知 / 提醒 / 闹钟。系统通知是另一个产品的事。
 - 协作 / 多人 / 同步。markdown 文件本身可被任何同步工具同步，但插件不管。
 - 任务依赖图（A blocks B）/ 甘特图。
-- 自定义视图（手写 query）——我们不是 Dataview，让用户用 Dataview。
+- 手写 Dataview 风格 query 语言——Task Center 提供可配置 Query Tab，不提供任意查询语言。
 - 富文本卡内容 / 附件 / 评论。
 - 主题 / 颜色自定义 UI——主题归 Obsidian。
 - 多选拖拽（v1）。
@@ -652,12 +723,12 @@ error <code>  <一句人话>
 
 ### 看板
 
-- [ ] 今日 / 周 / 月 / 已完成 / 未排期 5 个 tab 切换正常；`⌃1~5` 切到对应 tab。（US-105 / US-166 / US-720）
-- [ ] 今日视图三组、改到明天、空状态和首屏视觉中心都成立。（US-720）
-- [ ] 周视图本周高亮今日列；`< 今 >` 正确翻周；列头显示 `N tasks · XhYm`。（US-101 / US-116）
-- [ ] 月视图日历每格可拖入。（US-122）
-- [ ] 已完成 tab 历史周折叠、本周展开；周组顶显示准确率。（US-303 / US-304）
-- [ ] 未排期池顶恒为"按 deadline 升序的下一件"。（US-104）
+- [ ] 预设 tab + 用户自定义 tab 切换正常；`⌃1~9` 切顶部可见前 9 个 tab；更多 tab 可从“更多”入口切换。（US-105 / US-109q / US-166）
+- [ ] Tab 菜单、右键、双击重命名、复制、编辑 query、排序、隐藏、删除 undo、恢复预设都成立；移动端有等价 sheet。（US-109n~s）
+- [ ] 今日预设 query 的默认三组、改到明天、空状态和首屏视觉中心都成立，复制后可编辑 sections。（US-720）
+- [ ] Week view 本周高亮今日列；`< 今 >` 正确翻周；列头显示 `N tasks · XhYm`。（US-101 / US-116）
+- [ ] Month view 日历每格可拖入。（US-122）
+- [ ] List view 支持状态历史、未排期、用户 section 配置；Matrix view 支持用户自定义 axis / buckets。（US-103 / US-103a / US-104）
 - [ ] 状态栏显示 `📋 N today · ⚠ M overdue`，点击打开看板。（US-106）
 - [ ] 关闭看板再打开记住上次 tab。（US-405）
 
@@ -666,7 +737,7 @@ error <code>  <一句人话>
 - [ ] 点标题不会进入 inline input；会打开源 Markdown 编辑面板，用户在原文里改标题。（US-161 / US-168）
 - [ ] 卡片上没有 `+ 子任务` / inline 子任务输入；点卡片打开源 Markdown 编辑面板后，在原文里新增子任务，新子按父级继承规则显示。（US-141 / US-144 / US-168）
 - [ ] 子任务在父卡内递归显示所有层级，不另起顶层卡。（US-142 / US-143）
-- [ ] 完成 / 放弃父级，活动 tab 整条分支消失，已完成 tab 可见。（US-145）
+- [ ] 完成 / 放弃父级，TODO query 中整条分支消失，已完成 / 已放弃 query 可见。（US-145）
 - [ ] 子的 `⏳ ≠` 父时显示 badge；相同时不显示。（US-149）
 
 ### 拖拽 / 撤销 / 放弃
@@ -674,6 +745,7 @@ error <code>  <一句人话>
 - [ ] 拖卡到另一天改 `⏳`，淡出 + 邻居上移有动画。（US-121 / US-127）
 - [ ] 拖卡到另一卡变子任务，跨文件移动行，toast + 撤销。（US-125 / US-228）
 - [ ] 拖卡到放弃目标区变 `[-] ❌ 今天`，UI 不出现垃圾桶/删除心智；未打钩子任务级联，已打钩子任务保留。（US-123 / US-124）
+- [ ] 桌面端若同时显示未排期区与放弃区，放弃区与上方主内容共用左边界和内容宽度，不出现右侧孤立窄栏。（UX §3 / §4.2）
 - [ ] 不能把 A 拖到 A 自己 / 后代上。（US-126）
 - [ ] `⌘/Ctrl+Z` 撤销 ≤ 20 步拖拽 / 改期 / 改名。（US-128）
 - [ ] 拖拽过程中悬停 tab 头 ≥ 600ms 自动切到那个 tab。（US-114）
@@ -683,7 +755,7 @@ error <code>  <一句人话>
 - [ ] Quick Add 写到当日 daily 文件尾；无可用 Daily Note 时阻止提交并提示配置，不写 fallback 文件。（US-163 / US-701）
 - [ ] 自然语言日期解析（中英）。
 - [ ] `/` 聚焦筛选；筛选支持 tag / 数值 / 关键字。（US-109 / US-166）
-- [ ] 已完成 tab 7 天准确率 + top tag 时长 显示正确。（US-303）
+- [ ] Summary preset 能按用户配置字段计算 sum / ratio / top N。（US-303）
 
 ### 空 / 错 / 性能
 

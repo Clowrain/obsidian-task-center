@@ -55,6 +55,7 @@ export interface TaskCenterSettings {
   // These are lightweight presets over the existing board surface; they do
   // not create a separate data model.
   savedViews: SavedTaskView[];
+  defaultSavedViewId: string | null;
   defaultView: "today" | "week" | "month" | "completed" | "unscheduled";
   openOnStartup: boolean;
   weekStartsOn: 0 | 1;
@@ -65,6 +66,7 @@ export interface TaskCenterSettings {
   // written in `setTab`.
   // see USER_STORIES.md
   lastTab: "today" | "week" | "month" | "completed" | "unscheduled" | null;
+  lastSavedViewId: string | null;
   // US-510: platform-conditional UI strings — shortcut hints / mouse
   // descriptions are branched per platform (desktop hint vs mobile hint),
   // not localized; these tunables also live mobile-only. Safe defaults so
@@ -82,23 +84,49 @@ export interface TaskCenterSettings {
 export type SavedViewStatus = "all" | TaskStatus | TaskStatus[];
 export type SavedViewTimeField = "scheduled" | "deadline" | "completed" | "created";
 export type SavedViewTimeFilters = Partial<Record<SavedViewTimeField, string>>;
+export type QueryViewType = "list" | "week" | "month" | "matrix";
+
+export interface SavedViewConfig {
+  type: QueryViewType;
+  // Optional preset semantic. Examples: "today", "completed", "unscheduled".
+  // This is not a new view type; it is metadata that lets the runtime restore
+  // which query preset semantics the user saved.
+  preset?: string;
+  orderBy?: string[];
+}
+
+export interface SavedViewSummaryMetric {
+  type: "count" | "sum" | "ratio" | "top_n" | "group_by";
+  field?: string;
+  numerator?: string;
+  denominator?: string;
+  by?: string;
+  limit?: number;
+  format?: string;
+}
 
 export interface SavedTaskView {
   id: string;
   name: string;
+  builtin?: boolean;
+  hidden?: boolean;
   search: string;
   tag: string;
   time: SavedViewTimeFilters;
   status: SavedViewStatus;
+  view?: SavedViewConfig;
+  summary?: SavedViewSummaryMetric[];
 }
 
 export const DEFAULT_SETTINGS: TaskCenterSettings = {
   savedViews: [],
+  defaultSavedViewId: null,
   defaultView: "week",
   openOnStartup: false,
   weekStartsOn: 1,
   stampCreated: true,
   lastTab: null,
+  lastSavedViewId: null,
   mobileLongPressMs: 500,
   mobileSwipeEnabled: true,
   mobileForceLayout: false,

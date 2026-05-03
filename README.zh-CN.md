@@ -100,6 +100,19 @@ CLI 输出适合人和 agent 读：列表行有稳定 id，写操作幂等，变
 npx skills add CorrectRoadH/obsidian-task-center
 ```
 
+## Crabbox
+
+仓库已经带好本地 Crabbox 配置，默认走 Blacksmith Testbox 后端做远程验证：
+
+```bash
+crabbox warmup
+crabbox run -- pnpm run typecheck
+crabbox run -- pnpm run test:unit
+crabbox run -- pnpm run test:e2e
+```
+
+默认配置在 `.crabbox.yaml`，预热 workflow 在 `.github/workflows/blacksmith-testbox.yml`。如果你的 Blacksmith 账号需要显式 org，先 `export CRABBOX_BLACKSMITH_ORG=<your-org>` 再执行 `crabbox warmup`。
+
 ## License
 
 MIT.
