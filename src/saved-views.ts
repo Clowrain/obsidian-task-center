@@ -1273,3 +1273,40 @@ export function queryPresetTagsArray(preset: QueryPreset): string[] {
   if (typeof tags === "string") return parseSavedViewTags(tags);
   return [];
 }
+
+// ── VAL-GUI-004: delete undo plan / execute ──
+
+/**
+ * Snapshot-and-index plan used by deleteSavedViewWithConfirm (GUI) and
+ * unit-testable without DOM.  `view` is normally a normalized copy from
+ * visibleQueryTabs().
+ */
+export interface QueryPresetDeleteUndoPlan {
+  snapshot: QueryPreset;
+  originalIndex: number;
+}
+
+export function computeQueryPresetDeleteUndoPlan(
+  presets: readonly QueryPreset[],
+  view: QueryPreset,
+): QueryPresetDeleteUndoPlan {
+  return {
+    snapshot: normalizeQueryPreset(view),
+    originalIndex: presets.findIndex((p) => p.id === view.id),
+  };
+}
+
+/**
+ * Re-inserts the snapshot at `plan.originalIndex` (clamped to the current
+ * array length) so undo restores the tab to its original position even when
+ * other tabs were added/removed between delete and undo.
+ */
+export function executeQueryPresetDeleteUndo(
+  presets: readonly QueryPreset[],
+  plan: QueryPresetDeleteUndoPlan,
+): QueryPreset[] {
+  const result = [...presets];
+  const insertIdx = Math.min(plan.originalIndex, result.length);
+  result.splice(insertIdx, 0, plan.snapshot);
+  return result;
+}

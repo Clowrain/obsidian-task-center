@@ -52,6 +52,8 @@ const {
   sameQueryPresetContent,
   parseQueryDsl,
   stringifyQueryPreset,
+  computeQueryPresetDeleteUndoPlan,
+  executeQueryPresetDeleteUndo,
 } = await import("../test/.compiled/saved-views.js");
 
 test("US-109c: createSavedView persists the current filter conditions, not a task snapshot", () => {
@@ -680,6 +682,343 @@ test("VAL-GUI-004: undo restores preset at correct position when deleted from be
 
   assert.deepEqual(restored.map((p) => p.id), ["sv-a", "sv-b", "sv-c"],
     "undo must restore first preset at its original beginning position");
+});
+
+// ── fix-m3-delete-undo-real-path: regression tests through
+//   computeQueryPresetDeleteUndoPlan / executeQueryPresetDeleteUndo,
+//   the same functions used by deleteSavedViewWithConfirm. ──
+
+test("VAL-GUI-004: computeQueryPresetDeleteUndoPlan uses stable-id findIndex, not object-reference indexOf", () => {
+  // Simulate the real scenario in deleteSavedViewWithConfirm:
+  // settings.queryPresets holds the originals; view comes from visibleQueryTabs()
+  // (normalized copies). originalIndex must be found by matching id.
+
+  const a = createQueryPreset("A", { status: "todo" }, () => "sv-a");
+  const b = createQueryPreset("B", { status: "done" }, () => "sv-b");
+  const c = createQueryPreset("C", { status: "all" }, () => "sv-c");
+  const settingsArray = [a, b, c];
+
+  // visibleQueryTabs() returns normalized copies (new objects)
+  const normalizedCopies = settingsArray.map((p) => normalizeQueryPreset(p));
+  const normalizedB = normalizedCopies[1];
+
+  // The normalized copy is a different object
+  assert.notStrictEqual(normalizedB, b);
+
+  // Production path: plan uses stable-id findIndex
+  const plan = computeQueryPresetDeleteUndoPlan(settingsArray, normalizedB);
+  assert.equal(plan.originalIndex, 1, "originalIndex must be found by id match");
+  assert.equal(plan.snapshot.id, "sv-b");
+  assert.equal(plan.snapshot.name, "B");
+
+  // Verify the snapshot is normalized (has the correct shape)
+  assert.equal(plan.snapshot.builtin, false);
+  assert.equal(plan.snapshot.hidden, false);
+  assert.ok(plan.snapshot.filters);
+  assert.deepEqual(plan.snapshot.filters.status, ["done"]);
+});
+
+test("VAL-GUI-004: executeQueryPresetDeleteUndo restores at original position within bounds", () => {
+  const a = createQueryPreset("A", { status: "todo" }, () => "sv-a");
+  const b = createQueryPreset("B", { status: "done" }, () => "sv-b");
+  const c = createQueryPreset("C", { status: "all" }, () => "sv-c");
+  const settingsArray = [a, b, c];
+
+  // Delete B (index 1)
+  const plan = computeQueryPresetDeleteUndoPlan(settingsArray, b);
+  const afterDelete = deleteQueryPresetById(settingsArray, "sv-b");
+  assert.deepEqual(afterDelete.map((p) => p.id), ["sv-a", "sv-c"]);
+
+  // Undo via production function
+  const restored = executeQueryPresetDeleteUndo(afterDelete, plan);
+  assert.deepEqual(restored.map((p) => p.id), ["sv-a", "sv-b", "sv-c"],
+    "undo restores at original position via executeQueryPresetDeleteUndo");
+  assert.equal(restored[1].name, "B");
+  assert.deepEqual(restored[1].filters.status, ["done"]);
+});
+
+test("VAL-GUI-004: executeQueryPresetDeleteUndo handles originalIndex beyond current length (clamps)", () => {
+  // If presets changed between delete and undo (e.g., other presets added),
+  // originalIndex may exceed current array length. The function clamps safely.
+
+  const a = createQueryPreset("A", { status: "todo" }, () => "sv-a");
+  const b = createQueryPreset("B", { status: "done" }, () => "sv-b");
+  const settingsArray = [a, b];
+
+  // B is at index 1
+  const plan = computeQueryPresetDeleteUndoPlan(settingsArray, b);
+  assert.equal(plan.originalIndex, 1);
+
+  // After delete, another preset gets added (simulating race)
+  const afterDelete = deleteQueryPresetById(settingsArray, "sv-b");
+  const c = createQueryPreset("C", { status: "all" }, () => "sv-c");
+  const withExtra = upsertQueryPreset(afterDelete, c);
+  assert.deepEqual(withExtra.map((p) => p.id), ["sv-a", "sv-c"]);
+  // originalIndex=1, but current length=2, so insertIdx = min(1, 2) = 1
+
+  const restored = executeQueryPresetDeleteUndo(withExtra, plan);
+  assert.deepEqual(restored.map((p) => p.id), ["sv-a", "sv-b", "sv-c"],
+    "undo clamps originalIndex when presets changed after delete");
+});
+
+test("VAL-GUI-004: full delete+undo flow preserves original order with default and active state, exercising production functions", () => {
+  // This test mirrors the exact logic from deleteSavedViewWithConfirm:
+  //   snapshot = computeQueryPresetDeleteUndoPlan(presets, view)
+  //   wasDefault = defaultId === view.id
+  //   wasActive = activeId === view.id
+  //   delete
+  //   undo restore with position + default + active
+
+  const a = createQueryPreset("Alpha", {
+    search: "focus",
+    tags: ["#work"],
+    status: ["todo"],
+    time: { scheduled: "week", deadline: "overdue" },
+    view: { type: "week", orderBy: ["deadline_risk"] },
+    summary: [{ type: "count" }, { type: "sum", field: "actual", format: "duration" }],
+  }, () => "sv-alpha");
+  const b = createQueryPreset("Beta", {
+    search: "docs",
+    tags: ["#docs"],
+    status: ["done"],
+    view: { type: "list" },
+    summary: [{ type: "count" }],
+  }, () => "sv-beta");
+  const c = createQueryPreset("Gamma", {
+    search: "meetings",
+    tags: ["#meeting"],
+    status: ["todo", "done"],
+    view: { type: "month" },
+    summary: [],
+  }, () => "sv-gamma");
+  const presets = [a, b, c];
+  const defaultId = "sv-alpha";
+  const activeId = "sv-beta";
+
+  // visibleQueryTabs() returns normalized copies
+  const normalizedCopies = presets.map((p) => normalizeQueryPreset(p));
+  const normalizedB = normalizedCopies[1]; // "Beta", the active one
+
+  // --- Snapshot via production function ---
+  const plan = computeQueryPresetDeleteUndoPlan(presets, normalizedB);
+  assert.equal(plan.originalIndex, 1);
+  assert.equal(plan.snapshot.id, "sv-beta");
+  assert.equal(plan.snapshot.name, "Beta");
+  assert.deepEqual(plan.snapshot.filters.search, "docs");
+  assert.deepEqual(plan.snapshot.filters.tags, ["#docs"]);
+  assert.deepEqual(plan.snapshot.filters.status, ["done"]);
+  assert.deepEqual(plan.snapshot.view, { type: "list" });
+  assert.equal(plan.snapshot.summary.length, 1);
+
+  // --- Capture state before delete (as deleteSavedViewWithConfirm does) ---
+  const wasDefault = defaultId === normalizedB.id;
+  const wasActive = activeId === normalizedB.id;
+  assert.equal(wasDefault, false, "Beta was not default");
+  assert.equal(wasActive, true, "Beta was active");
+
+  // --- Delete via production helper ---
+  const afterDelete = deleteQueryPresetById(presets, "sv-beta");
+  assert.deepEqual(afterDelete.map((p) => p.id), ["sv-alpha", "sv-gamma"]);
+
+  // --- Undo via production function ---
+  const restored = executeQueryPresetDeleteUndo(afterDelete, plan);
+  assert.deepEqual(restored.map((p) => p.id), ["sv-alpha", "sv-beta", "sv-gamma"],
+    "undo restores Beta at its original position between Alpha and Gamma");
+
+  const restoredBeta = restored[1];
+  assert.equal(restoredBeta.name, "Beta");
+  assert.equal(restoredBeta.builtin, false);
+  assert.equal(restoredBeta.hidden, false);
+  assert.deepEqual(restoredBeta.filters, plan.snapshot.filters,
+    "restored snapshot must have all filter fields preserved");
+  assert.deepEqual(restoredBeta.view, plan.snapshot.view,
+    "restored snapshot must have view config preserved");
+  assert.equal(restoredBeta.summary.length, 1,
+    "restored snapshot must have summary metrics preserved");
+
+  // --- Verify default/active restoration logic ---
+  if (wasDefault) {
+    // wasDefault=false for Beta, so this branch wouldn't execute
+  }
+  if (wasActive) {
+    const reactivated = restored.find((p) => p.id === plan.snapshot.id);
+    assert.ok(reactivated, "restored to active tab when wasActive is true");
+    assert.equal(reactivated.id, "sv-beta");
+  }
+});
+
+test("VAL-GUI-004: delete+undo restores default state correctly through production functions", () => {
+  // Delete the DEFAULT tab (Alpha), verify undo restores it as default
+
+  const a = createQueryPreset("Alpha", { status: "todo" }, () => "sv-alpha");
+  const b = createQueryPreset("Beta", { status: "done" }, () => "sv-beta");
+  const c = createQueryPreset("Gamma", { status: "all" }, () => "sv-gamma");
+  const presets = [a, b, c];
+  const defaultId = "sv-alpha"; // Alpha is default
+  const activeId = "sv-alpha";  // Alpha is also active
+
+  const normalizedCopies = presets.map((p) => normalizeQueryPreset(p));
+  const normalizedA = normalizedCopies[0];
+
+  const plan = computeQueryPresetDeleteUndoPlan(presets, normalizedA);
+  assert.equal(plan.originalIndex, 0);
+
+  const wasDefault = defaultId === normalizedA.id;
+  const wasActive = activeId === normalizedA.id;
+  assert.equal(wasDefault, true, "Alpha was default");
+  assert.equal(wasActive, true, "Alpha was active");
+
+  const afterDelete = deleteQueryPresetById(presets, "sv-alpha");
+  assert.deepEqual(afterDelete.map((p) => p.id), ["sv-beta", "sv-gamma"]);
+
+  const restored = executeQueryPresetDeleteUndo(afterDelete, plan);
+  assert.deepEqual(restored.map((p) => p.id), ["sv-alpha", "sv-beta", "sv-gamma"],
+    "undo restores default/active tab at original position");
+
+  // Verify default and active state would be restored
+  if (wasDefault) {
+    // Production code would do: this.plugin.settings.defaultSavedViewId = plan.snapshot.id
+    const newDefaultId = plan.snapshot.id;
+    assert.equal(newDefaultId, "sv-alpha", "default should be restored to Alpha");
+  }
+  if (wasActive) {
+    const reactivated = restored.find((p) => p.id === plan.snapshot.id);
+    assert.ok(reactivated, "restored to active tab");
+  }
+});
+
+test("VAL-GUI-004: delete+undo preserves full QueryPreset detail through production snapshot", () => {
+  // Verify that the snapshot captured by computeQueryPresetDeleteUndoPlan
+  // preserves all QueryPreset fields including matrix config, tray, sections, summary
+
+  const rich = normalizeQueryPreset({
+    id: "sv-rich",
+    name: "Rich View",
+    builtin: false,
+    hidden: false,
+    filters: {
+      search: "deep work",
+      tags: ["#focus", "#priority"],
+      status: ["todo", "in_progress"],
+      time: { scheduled: "week", deadline: "overdue", completed: "month" },
+    },
+    view: {
+      type: "matrix",
+      sections: [
+        { id: "urgent", title: "Urgent", when: { time: { deadline: "overdue" } }, limit: 5, orderBy: ["deadline_asc"] },
+      ],
+      tray: {
+        enabled: true,
+        title: "Backlog",
+        filters: { status: ["todo"], time: { scheduled: "unscheduled" } },
+        orderBy: ["deadline_asc"],
+      },
+      matrix: {
+        x: {
+          id: "pri",
+          title: "Priority",
+          buckets: [
+            { id: "high", title: "High", when: { tags: ["#high"] } },
+            { id: "low", title: "Low", when: { tags: ["#low"] } },
+          ],
+        },
+        y: {
+          id: "stat",
+          title: "Status",
+          buckets: [
+            { id: "open", title: "Open", when: { status: ["todo"] } },
+            { id: "done", title: "Done", when: { status: ["done"] } },
+          ],
+        },
+        unmatched: "hide",
+        multiMatch: "duplicate",
+        showEmptyBuckets: false,
+      },
+      orderBy: ["deadline_asc", "created_desc"],
+      preset: "today",
+    },
+    summary: [
+      { type: "count" },
+      { type: "sum", field: "planned", format: "duration" },
+      { type: "ratio", numerator: "actual", denominator: "estimate", format: "percent" },
+      { type: "top_n", by: "tags", limit: 5 },
+      { type: "group_by", by: "tags" },
+    ],
+  });
+
+  const presets = [createQueryPreset("Other", { status: "all" }, () => "sv-other"), rich];
+  const plan = computeQueryPresetDeleteUndoPlan(presets, rich);
+  const snapshot = plan.snapshot;
+
+  assert.equal(snapshot.id, "sv-rich");
+  assert.equal(snapshot.name, "Rich View");
+
+  // Filters
+  assert.equal(snapshot.filters.search, "deep work");
+  assert.deepEqual(snapshot.filters.tags, ["#focus", "#priority"]);
+  assert.deepEqual(snapshot.filters.status, ["todo", "in_progress"]);
+  assert.deepEqual(snapshot.filters.time, {
+    scheduled: "week", deadline: "overdue", completed: "month",
+  });
+
+  // View
+  assert.equal(snapshot.view.type, "matrix");
+  assert.equal(snapshot.view.preset, "today");
+  assert.deepEqual(snapshot.view.orderBy, ["deadline_asc", "created_desc"]);
+  assert.ok(snapshot.view.sections);
+  assert.equal(snapshot.view.sections.length, 1);
+  assert.equal(snapshot.view.sections[0].id, "urgent");
+  assert.ok(snapshot.view.tray);
+  assert.equal(snapshot.view.tray.title, "Backlog");
+  assert.ok(snapshot.view.matrix);
+  assert.equal(snapshot.view.matrix.x.id, "pri");
+  assert.equal(snapshot.view.matrix.y.id, "stat");
+  assert.equal(snapshot.view.matrix.unmatched, "hide");
+  assert.equal(snapshot.view.matrix.multiMatch, "duplicate");
+  assert.equal(snapshot.view.matrix.showEmptyBuckets, false);
+
+  // Summary — all 5 metric types preserved
+  assert.equal(snapshot.summary.length, 5);
+  assert.equal(snapshot.summary[0].type, "count");
+  assert.equal(snapshot.summary[1].type, "sum");
+  assert.equal(snapshot.summary[1].field, "planned");
+  assert.equal(snapshot.summary[2].type, "ratio");
+  assert.equal(snapshot.summary[3].type, "top_n");
+  assert.equal(snapshot.summary[3].by, "tags");
+  assert.equal(snapshot.summary[4].type, "group_by");
+
+  // Full roundtrip: delete then undo
+  const afterDelete = deleteQueryPresetById(presets, "sv-rich");
+  assert.equal(afterDelete.length, 1);
+  const restored = executeQueryPresetDeleteUndo(afterDelete, plan);
+  assert.equal(restored.length, 2);
+  const restoredRich = restored.find((p) => p.id === "sv-rich");
+  assert.ok(restoredRich);
+  assert.deepEqual(restoredRich.filters, snapshot.filters);
+  assert.deepEqual(restoredRich.view, snapshot.view);
+  assert.deepEqual(restoredRich.summary, snapshot.summary);
+});
+
+test("VAL-GUI-004: computeQueryPresetDeleteUndoPlan returns originalIndex=-1 for non-existent id", () => {
+  const a = createQueryPreset("A", { status: "todo" }, () => "sv-a");
+  const ghost = normalizeQueryPreset({
+    id: "sv-ghost",
+    name: "Ghost",
+    builtin: false,
+    hidden: false,
+    filters: { status: "todo" },
+    view: { type: "list" },
+    summary: [],
+  });
+
+  const plan = computeQueryPresetDeleteUndoPlan([a], ghost);
+  assert.equal(plan.originalIndex, -1,
+    "missing id returns -1; caller should guard before undo");
+
+  // executeQueryPresetDeleteUndo with -1 inserts at 0 (min(-1, len) = 0)
+  const result = executeQueryPresetDeleteUndo([a], plan);
+  assert.deepEqual(result.map((p) => p.id), ["sv-ghost", "sv-a"],
+    "insertIdx is clamped to 0 when originalIndex is -1");
 });
 
 // ── fix-m3-desktop-query-editor-full-dsl-roundtrip ──

@@ -41,6 +41,8 @@ import { taskMatchesTimeToken, timeTokenAppliesToField } from "./time-filter";
 import {
   applyQueryPresetFilters,
   builtinSavedViewId,
+  computeQueryPresetDeleteUndoPlan,
+  executeQueryPresetDeleteUndo,
   restoreBuiltinQueryPresetById,
   restoreBuiltinQueryPresets,
   clearQueryPresetFilters as emptySavedViewFilters,
@@ -1426,18 +1428,17 @@ export class TaskCenterView extends ItemView {
     });
     if (!confirmed) return;
 
-    // Snapshot for undo
-    const snapshot = normalizeQueryPreset(view);
+    // Snapshot for undo — uses stable-id findIndex (not object-reference indexOf)
     const wasDefault = this.plugin.settings.defaultSavedViewId === view.id;
     const wasActive = this.state.savedViewId === view.id;
-    const originalIndex = this.plugin.settings.queryPresets.findIndex((p) => p.id === view.id);
+    const undoPlan = computeQueryPresetDeleteUndoPlan(this.plugin.settings.queryPresets, view);
 
     await this.deleteSavedView(view);
 
     // Clickable undo toast
     const notice = new Notice("", 8000);
     notice.messageEl.empty();
-    notice.messageEl.createSpan({ text: tr("notice.deleted", { name: snapshot.name }) });
+    notice.messageEl.createSpan({ text: tr("notice.deleted", { name: undoPlan.snapshot.name }) });
 
     let undone = false;
     const restore = async () => {
@@ -1446,23 +1447,23 @@ export class TaskCenterView extends ItemView {
       notice.hide();
 
       // Re-insert snapshot at original position
-      const presets = [...this.plugin.settings.queryPresets];
-      const insertIdx = Math.min(originalIndex, presets.length);
-      presets.splice(insertIdx, 0, snapshot);
-      this.plugin.settings.queryPresets = presets;
-      this.tabDrafts.delete(snapshot.id);
+      this.plugin.settings.queryPresets = executeQueryPresetDeleteUndo(
+        this.plugin.settings.queryPresets,
+        undoPlan,
+      );
+      this.tabDrafts.delete(undoPlan.snapshot.id);
 
       if (wasDefault) {
-        this.plugin.settings.defaultSavedViewId = snapshot.id;
+        this.plugin.settings.defaultSavedViewId = undoPlan.snapshot.id;
       }
       if (wasActive) {
-        const restored = this.plugin.settings.queryPresets.find((p) => p.id === snapshot.id);
+        const restored = this.plugin.settings.queryPresets.find((p) => p.id === undoPlan.snapshot.id);
         if (restored) this.applySavedView(restored);
       }
 
       await this.plugin.saveSettings();
       this.render();
-      new Notice(tr("notice.undoRestored", { name: snapshot.name }), 3000);
+      new Notice(tr("notice.undoRestored", { name: undoPlan.snapshot.name }), 3000);
     };
 
     const undoBtn = notice.messageEl.createSpan({
