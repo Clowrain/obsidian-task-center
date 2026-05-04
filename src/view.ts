@@ -2008,6 +2008,21 @@ export class TaskCenterView extends ItemView {
     summarySection.createDiv({ cls: "bt-query-editor-section-note", text: tr("savedViews.queryEditorSummaryHelp") });
 
     const summaryList = summarySection.createDiv({ cls: "bt-query-editor-summary-list" });
+
+    // Helper: update a metric at index i within the draft and re-render.
+    const updateMetricInDraft = (i: number, patch: Partial<QueryPresetSummaryMetric>) => {
+      const active = this.activeSavedView();
+      const draft = this.currentQuerySnapshot(active);
+      const metrics = [...(draft.summary ?? [])];
+      if (i >= 0 && i < metrics.length) {
+        metrics[i] = { ...metrics[i], ...patch };
+      }
+      draft.summary = metrics;
+      this.tabDrafts.set(active.id, draft);
+      this.applySavedView(draft);
+      renderSummaryMetrics();
+    };
+
     const renderSummaryMetrics = () => {
       summaryList.empty();
       const metrics = this.currentSavedViewSummary();
@@ -2015,25 +2030,92 @@ export class TaskCenterView extends ItemView {
         const metric = metrics[i];
         const row = summaryList.createDiv({ cls: "bt-query-editor-summary-row" });
         row.dataset.summaryMetric = metric.type;
-        // Metric type label
+
+        // Metric type label (read-only — type is set on creation)
         const typeLabel = row.createSpan({ cls: "bt-query-editor-summary-type" });
         switch (metric.type) {
           case "count":
             typeLabel.setText(tr("savedViews.summaryMetricCount"));
             break;
           case "sum":
-            typeLabel.setText(`${tr("savedViews.summaryMetricSum")}(${metric.field ?? "?"})`);
+            typeLabel.setText(tr("savedViews.summaryMetricSum"));
             break;
           case "ratio":
-            typeLabel.setText(`${tr("savedViews.summaryMetricRatio")}(${metric.numerator ?? "?"}/${metric.denominator ?? "?"})`);
+            typeLabel.setText(tr("savedViews.summaryMetricRatio"));
             break;
           case "top_n":
-            typeLabel.setText(`${tr("savedViews.summaryMetricTopN")}(${metric.field ?? "?"}, limit=${metric.limit ?? "?"})`);
+            typeLabel.setText(tr("savedViews.summaryMetricTopN"));
             break;
           case "group_by":
-            typeLabel.setText(`${tr("savedViews.summaryMetricGroupBy")}(${metric.by ?? "?"})`);
+            typeLabel.setText(tr("savedViews.summaryMetricGroupBy"));
             break;
         }
+
+        // Editable fields per metric type
+        if (metric.type === "sum") {
+          const fieldInput = row.createEl("input", {
+            type: "text",
+            placeholder: "planned",
+            cls: "bt-query-editor-summary-field-input",
+          });
+          fieldInput.value = metric.field ?? "";
+          fieldInput.addEventListener("input", () => {
+            updateMetricInDraft(i, { field: fieldInput.value.trim() || undefined });
+          });
+        }
+        if (metric.type === "ratio") {
+          const numInput = row.createEl("input", {
+            type: "text",
+            placeholder: "actual",
+            cls: "bt-query-editor-summary-field-input",
+          });
+          numInput.value = metric.numerator ?? "";
+          numInput.addEventListener("input", () => {
+            updateMetricInDraft(i, { numerator: numInput.value.trim() || undefined });
+          });
+          const denInput = row.createEl("input", {
+            type: "text",
+            placeholder: "estimate",
+            cls: "bt-query-editor-summary-field-input",
+          });
+          denInput.value = metric.denominator ?? "";
+          denInput.addEventListener("input", () => {
+            updateMetricInDraft(i, { denominator: denInput.value.trim() || undefined });
+          });
+        }
+        if (metric.type === "top_n") {
+          const fieldInput = row.createEl("input", {
+            type: "text",
+            placeholder: "tags",
+            cls: "bt-query-editor-summary-field-input",
+          });
+          fieldInput.value = metric.field ?? "";
+          fieldInput.addEventListener("input", () => {
+            updateMetricInDraft(i, { field: fieldInput.value.trim() || undefined });
+          });
+          const limitInput = row.createEl("input", {
+            type: "number",
+            placeholder: "5",
+            cls: "bt-query-editor-summary-field-input",
+          });
+          limitInput.value = metric.limit != null ? String(metric.limit) : "";
+          limitInput.addEventListener("input", () => {
+            const v = Number(limitInput.value);
+            updateMetricInDraft(i, { limit: Number.isFinite(v) ? v : undefined });
+          });
+        }
+        if (metric.type === "group_by") {
+          const byInput = row.createEl("input", {
+            type: "text",
+            placeholder: "tags",
+            cls: "bt-query-editor-summary-field-input",
+          });
+          byInput.value = metric.by ?? "";
+          byInput.addEventListener("input", () => {
+            updateMetricInDraft(i, { by: byInput.value.trim() || undefined });
+          });
+        }
+
         // Remove button
         const removeBtn = row.createEl("button", {
           text: tr("savedViews.summaryRemove"),
@@ -3802,6 +3884,10 @@ export class TaskCenterView extends ItemView {
   private currentQuerySnapshot(existing?: QueryPreset | null, name?: string): QueryPreset {
     const tagStr = this.state.savedViewTag;
     const tagArray = tagStr ? tagStr.split(",").filter(Boolean) : undefined;
+    const tabDraft = existing ? this.tabDrafts.get(existing.id) : undefined;
+    // Merge tabDrafts view/summary into the snapshot so visual edits are
+    // visible to dirty checks, save-as, and update paths.  Identity fields
+    // (id/name/builtin/hidden) come from the saved existing preset.
     return normalizeQueryPreset({
       id: existing?.id ?? `draft-${this.state.tab}`,
       name: (name ?? existing?.name ?? this.suggestSavedViewName()).trim(),
@@ -3813,8 +3899,8 @@ export class TaskCenterView extends ItemView {
         time: this.state.savedViewTime,
         status: this.state.savedViewStatus,
       },
-      view: existing?.view ?? this.currentQueryPresetViewConfig(),
-      summary: existing?.summary ?? this.currentSavedViewSummary(),
+      view: tabDraft?.view ?? existing?.view ?? this.currentQueryPresetViewConfig(),
+      summary: tabDraft?.summary ?? existing?.summary ?? this.currentSavedViewSummary(),
     });
   }
 
@@ -3868,13 +3954,18 @@ export class TaskCenterView extends ItemView {
   }
 
   private currentSavedViewSummary(): QueryPresetSummaryMetric[] {
-    // Read from the active saved QueryPreset's summary (draft or saved),
-    // falling back to legacy tab-based defaults only when no saved summary exists.
+    // Read from the active saved QueryPreset's summary (draft or saved).
+    // Draft always wins (even if empty); saved summary is used as-is.
+    // Only fall through to legacy tab defaults when there's no saved view.
     const saved = this.selectedSavedView();
     if (saved) {
       const draft = this.tabDrafts.get(saved.id);
-      const effective = draft ?? saved;
-      if (effective.summary && effective.summary.length > 0) return effective.summary;
+      if (draft) {
+        return draft.summary ?? [];
+      }
+      // Use saved summary as-is — an empty array means "no summary"
+      // was explicitly configured (or the builtin preset ships without one).
+      return saved.summary ?? [];
     }
     return this.defaultSummaryForLegacyTab();
   }
