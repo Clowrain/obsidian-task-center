@@ -118,6 +118,58 @@ export interface SavedTaskView {
   summary?: SavedViewSummaryMetric[];
 }
 
+// ── QueryPreset DSL — the canonical query model (ARCHITECTURE.md §1.3) ──
+// Legacy SavedTaskView is the flat predecessor; QueryPreset nests
+// filters/view/summary into a single DSL object shared by GUI, CLI,
+// and settings storage. No migration path exists for old SavedTaskView
+// data.json entries (VAL-CORE-005 / VAL-CROSS-002).
+
+export interface QueryPresetFilters {
+  search?: string;
+  tags?: string[] | string;
+  status?: SavedViewStatus;
+  time?: SavedViewTimeFilters;
+}
+
+export interface QueryPresetViewConfig {
+  type: QueryViewType;
+  preset?: string;
+  orderBy?: string[];
+}
+
+export interface QueryPresetSummaryMetric {
+  type: "count" | "sum" | "ratio" | "top_n" | "group_by";
+  field?: string;
+  numerator?: string;
+  denominator?: string;
+  by?: string;
+  limit?: number;
+  format?: string;
+}
+
+export interface QueryPreset {
+  id: string;
+  name: string;
+  builtin: boolean;
+  hidden: boolean;
+  filters: QueryPresetFilters;
+  view: QueryPresetViewConfig;
+  summary: QueryPresetSummaryMetric[];
+}
+
+export type QueryPresetSection = "filters" | "view" | "summary";
+
+export interface QueryPresetValidationError {
+  section: QueryPresetSection;
+  code: string;
+  message: string;
+}
+
+export interface QueryPresetValidationResult {
+  valid: boolean;
+  errors: QueryPresetValidationError[];
+}
+
 export const DEFAULT_SETTINGS: TaskCenterSettings = {
   savedViews: [],
   defaultSavedViewId: null,

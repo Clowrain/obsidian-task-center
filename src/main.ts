@@ -27,6 +27,7 @@ import {
   createSavedViewId,
   deleteSavedViewById,
   duplicateSavedView,
+  isLegacySavedTaskView,
   normalizeSavedTaskView,
   parseSavedViewDsl,
   renameSavedViewById,
@@ -234,12 +235,28 @@ export default class TaskCenterPlugin extends Plugin {
   async loadSettings() {
     const loaded = (await this.loadData()) as Partial<typeof DEFAULT_SETTINGS> | undefined;
     const merged = { ...DEFAULT_SETTINGS, ...loaded };
-    const savedViews = ensureBuiltinSavedViews(merged.savedViews ?? [], {
+
+    // VAL-CORE-005 / VAL-CROSS-002: detect and reject legacy SavedTaskView
+    // shapes (flat `search`/`tag`/`time`/`status` top-level fields) by
+    // filtering them out before builtin seeding. No migration — old data is
+    // silently replaced with defaults.
+    const rawViews: unknown[] = merged.savedViews ?? [];
+    const rejectedCount = rawViews.filter((v) => isLegacySavedTaskView(v)).length;
+    if (rejectedCount > 0) {
+      console.warn(
+        `[task-center] 检测到 ${rejectedCount} 个旧版 SavedTaskView，已替换为默认 QueryPreset。旧 saved-view 配置不会迁移。`,
+      );
+    }
+    const cleanViews = rawViews.filter((v) => !isLegacySavedTaskView(v));
+
+    const savedViews = ensureBuiltinSavedViews(cleanViews as Parameters<typeof ensureBuiltinSavedViews>[0], {
       today: tr("tab.today"),
       week: tr("tab.week"),
       month: tr("tab.month"),
-      completed: tr("tab.completed"),
+      todo: tr("tab.todo"),
       unscheduled: tr("tab.unscheduled"),
+      completed: tr("tab.completed"),
+      dropped: tr("tab.dropped"),
     });
     const defaultSavedViewId =
       merged.defaultSavedViewId
@@ -811,7 +828,7 @@ export default class TaskCenterPlugin extends Plugin {
     return formatOkWrite(parent, null, null, r.before, r.after, r.unchanged, label, r.unchanged ? "unchanged" : undefined);
   }
 
-  private async cliQueryList(args: CliArgs): Promise<string> {
+  private cliQueryList(args: CliArgs): string {
     const all = args.hidden ? this.settings.savedViews.map((view) => normalizeSavedTaskView(view)) : visibleSavedViews(this.settings.savedViews);
     if (args.format === "json") {
       return JSON.stringify(
@@ -837,7 +854,7 @@ export default class TaskCenterPlugin extends Plugin {
     return lines.join("\n");
   }
 
-  private async cliQueryShow(args: CliArgs): Promise<string> {
+  private cliQueryShow(args: CliArgs): string {
     const view = this.requireSavedView(requireArg(args.id, "id"));
     return stringifySavedViewDsl(view);
   }

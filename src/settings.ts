@@ -49,7 +49,9 @@ export class TaskCenterSettingTab extends PluginSettingTab {
               today: tr("tab.today"),
               week: tr("tab.week"),
               month: tr("tab.month"),
+              todo: tr("tab.todo"),
               completed: tr("tab.completed"),
+              dropped: tr("tab.dropped"),
               unscheduled: tr("tab.unscheduled"),
             });
             const visible = visibleSavedViews(this.plugin.settings.savedViews);

@@ -25,6 +25,8 @@ const EN = {
   "tab.month": "Month",
   "tab.completed": "Completed",
   "tab.unscheduled": "Unscheduled",
+  "tab.todo": "TODO",
+  "tab.dropped": "Dropped",
 
   // Toolbar
   "toolbar.today": "Today",
@@ -339,6 +341,8 @@ const ZH: Partial<typeof EN> = {
   "tab.month": "本月",
   "tab.completed": "已完成",
   "tab.unscheduled": "未排期",
+  "tab.todo": "TODO",
+  "tab.dropped": "已放弃",
 
   "toolbar.today": "今天",
   "toolbar.weekNo": "第{n}周",

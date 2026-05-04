@@ -298,10 +298,9 @@ test("loadSettings seeds built-in query tabs and migrates legacy defaultView/las
       {
         id: "sv-custom",
         name: "Custom",
-        search: "docs",
-        tag: "#work",
-        time: {},
-        status: ["todo"],
+        builtin: false,
+        hidden: false,
+        filters: { search: "docs", tags: ["#work"], status: ["todo"], time: {} },
         view: { type: "list" },
         summary: [],
       },
@@ -312,12 +311,14 @@ test("loadSettings seeds built-in query tabs and migrates legacy defaultView/las
 
   await plugin.loadSettings();
 
-  assert.deepEqual(plugin.settings.savedViews.slice(0, 5).map((view) => view.id), [
+  assert.deepEqual(plugin.settings.savedViews.slice(0, 7).map((view) => view.id), [
     "preset-today",
     "preset-week",
     "preset-month",
-    "preset-completed",
+    "preset-todo",
     "preset-unscheduled",
+    "preset-completed",
+    "preset-dropped",
   ]);
   assert.equal(plugin.settings.defaultSavedViewId, "preset-month");
   assert.equal(plugin.settings.lastSavedViewId, "preset-completed");

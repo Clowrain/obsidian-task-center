@@ -246,12 +246,14 @@ test("US-109l: restoreBuiltinSavedViews recreates the full preset tab set withou
     },
   ], { today: "今日" });
 
-  assert.deepEqual(restored.slice(0, 5).map((view) => view.id), [
+  assert.deepEqual(restored.slice(0, 7).map((view) => view.id), [
     "preset-today",
     "preset-week",
     "preset-month",
-    "preset-completed",
+    "preset-todo",
     "preset-unscheduled",
+    "preset-completed",
+    "preset-dropped",
   ]);
   assert.equal(restored[0].name, "今日");
   assert.equal(restored[0].hidden, false);
@@ -374,16 +376,20 @@ test("US-109j/l: ensureBuiltinSavedViews seeds missing built-in query tabs and p
     today: "今日",
     week: "本周",
     month: "本月",
+    todo: "TODO",
     completed: "已完成",
+    dropped: "已放弃",
     unscheduled: "未排期",
   });
 
-  assert.deepEqual(views.slice(0, 5).map((view) => view.id), [
+  assert.deepEqual(views.slice(0, 7).map((view) => view.id), [
     "preset-today",
     "preset-week",
     "preset-month",
-    "preset-completed",
+    "preset-todo",
     "preset-unscheduled",
+    "preset-completed",
+    "preset-dropped",
   ]);
   assert.equal(views[0].builtin, true);
   assert.equal(views[0].hidden, true);
