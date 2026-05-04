@@ -1430,7 +1430,7 @@ export class TaskCenterView extends ItemView {
     const snapshot = normalizeQueryPreset(view);
     const wasDefault = this.plugin.settings.defaultSavedViewId === view.id;
     const wasActive = this.state.savedViewId === view.id;
-    const originalIndex = this.plugin.settings.queryPresets.indexOf(view);
+    const originalIndex = this.plugin.settings.queryPresets.findIndex((p) => p.id === view.id);
 
     await this.deleteSavedView(view);
 

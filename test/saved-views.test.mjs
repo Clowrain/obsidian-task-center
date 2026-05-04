@@ -574,6 +574,114 @@ test("VAL-GUI-004: snapshot normalizeQueryPreset strips unknown fields", () => {
   assert.equal("unknownField" in preset, false);
 });
 
+// ── fix-m3-delete-undo-original-index ──
+
+test("VAL-GUI-004: originalIndex computed by stable id, not object-reference indexOf on normalized copies", () => {
+  // Simulate the real-world scenario:
+  // settings.queryPresets holds the original objects.
+  // visibleQueryTabs() returns normalized copies (new objects via normalizeQueryPreset).
+  // deleteSavedViewWithConfirm receives a normalized copy as `view`.
+  // originalIndex must be found by matching id, not by object-reference indexOf.
+
+  const a = createQueryPreset("A", { status: "todo" }, () => "sv-a");
+  const b = createQueryPreset("B", { status: "done" }, () => "sv-b");
+  const c = createQueryPreset("C", { status: "all" }, () => "sv-c");
+  const settingsArray = [a, b, c];
+
+  // Simulate visibleQueryTabs() returning normalized copies
+  const normalizedCopies = settingsArray.map((p) => normalizeQueryPreset(p));
+
+  // The normalized copy of B is a *different object* than the original B
+  const normalizedB = normalizedCopies[1];
+  assert.equal(normalizedB.id, "sv-b");
+  assert.notStrictEqual(normalizedB, b, "normalizeQueryPreset must create a new object");
+
+  // BUG: indexOf on original array with normalized copy returns -1
+  const badIndex = settingsArray.indexOf(normalizedB);
+  assert.equal(badIndex, -1, "indexOf a normalized copy should fail on the original array");
+
+  // FIX: findIndex by stable id works correctly
+  const goodIndex = settingsArray.findIndex((p) => p.id === normalizedB.id);
+  assert.equal(goodIndex, 1, "findIndex by id should find the correct position");
+
+  // Full undo simulation with the fixed index computation
+  const snapshot = normalizeQueryPreset(normalizedB);
+  const originalIndex = goodIndex; // The correct computation
+
+  // Delete B from settingsArray
+  const afterDelete = deleteQueryPresetById(settingsArray, "sv-b");
+  assert.deepEqual(afterDelete.map((p) => p.id), ["sv-a", "sv-c"]);
+
+  // Undo: insert snapshot at originalIndex
+  const insertIdx = Math.min(originalIndex, afterDelete.length);
+  const restored = [...afterDelete];
+  restored.splice(insertIdx, 0, snapshot);
+
+  // Verify B is restored at its original position (index 1), between A and C
+  assert.deepEqual(restored.map((p) => p.id), ["sv-a", "sv-b", "sv-c"],
+    "undo must restore deleted preset at its original stable-id order position");
+});
+
+test("VAL-GUI-004: undo restores preset at correct position when deleted from end, using stable id", () => {
+  const a = createQueryPreset("A", { status: "todo" }, () => "sv-a");
+  const b = createQueryPreset("B", { status: "done" }, () => "sv-b");
+  const c = createQueryPreset("C", { status: "all" }, () => "sv-c");
+  const settingsArray = [a, b, c];
+
+  // Simulate normalized copy for C (last item, index 2)
+  const normalizedCopies = settingsArray.map((p) => normalizeQueryPreset(p));
+  const normalizedC = normalizedCopies[2];
+  assert.equal(normalizedC.id, "sv-c");
+
+  // findIndex by id gives 2
+  const originalIndex = settingsArray.findIndex((p) => p.id === normalizedC.id);
+  assert.equal(originalIndex, 2);
+
+  const snapshot = normalizeQueryPreset(normalizedC);
+
+  // Delete C
+  const afterDelete = deleteQueryPresetById(settingsArray, "sv-c");
+  assert.deepEqual(afterDelete.map((p) => p.id), ["sv-a", "sv-b"]);
+
+  // Undo: insert at originalIndex (2), min(2, 2) = 2, splice appends
+  const insertIdx = Math.min(originalIndex, afterDelete.length);
+  const restored = [...afterDelete];
+  restored.splice(insertIdx, 0, snapshot);
+
+  assert.deepEqual(restored.map((p) => p.id), ["sv-a", "sv-b", "sv-c"],
+    "undo must restore last preset at its original end position");
+});
+
+test("VAL-GUI-004: undo restores preset at correct position when deleted from beginning, using stable id", () => {
+  const a = createQueryPreset("A", { status: "todo" }, () => "sv-a");
+  const b = createQueryPreset("B", { status: "done" }, () => "sv-b");
+  const c = createQueryPreset("C", { status: "all" }, () => "sv-c");
+  const settingsArray = [a, b, c];
+
+  // Simulate normalized copy for A (first item, index 0)
+  const normalizedCopies = settingsArray.map((p) => normalizeQueryPreset(p));
+  const normalizedA = normalizedCopies[0];
+  assert.equal(normalizedA.id, "sv-a");
+
+  // findIndex by id gives 0
+  const originalIndex = settingsArray.findIndex((p) => p.id === normalizedA.id);
+  assert.equal(originalIndex, 0);
+
+  const snapshot = normalizeQueryPreset(normalizedA);
+
+  // Delete A
+  const afterDelete = deleteQueryPresetById(settingsArray, "sv-a");
+  assert.deepEqual(afterDelete.map((p) => p.id), ["sv-b", "sv-c"]);
+
+  // Undo: insert at originalIndex 0
+  const insertIdx = Math.min(originalIndex, afterDelete.length);
+  const restored = [...afterDelete];
+  restored.splice(insertIdx, 0, snapshot);
+
+  assert.deepEqual(restored.map((p) => p.id), ["sv-a", "sv-b", "sv-c"],
+    "undo must restore first preset at its original beginning position");
+});
+
 // ── fix-m3-desktop-query-editor-full-dsl-roundtrip ──
 
 test("roundtrip: normalizeQueryPresetView preserves sections", () => {
