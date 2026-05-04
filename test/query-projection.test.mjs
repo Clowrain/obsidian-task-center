@@ -1256,3 +1256,309 @@ test("M4: showEmptyBuckets=true with multiMatch=duplicate — empty cells remain
   const emptyCells = model.cells.filter((c) => c.tasks.length === 0);
   assert.ok(emptyCells.length > 0, "Empty cells exist with showEmptyBuckets=true");
 });
+
+// ── M4: Matrix axis metadata visibility (showEmptyBuckets) ──
+
+test("M4: showEmptyBuckets=false — xAxis buckets only include columns with visible cells", async () => {
+  if (compileErr) throw compileErr;
+
+  const { applyViewProjection } = await import("../test/.compiled/projection.js");
+
+  const tasks = [
+    effectiveTask({ id: "test.md:L1", title: "Work task", tags: ["#work"], status: "todo", effectiveStatus: "todo" }),
+  ];
+
+  const model = applyViewProjection(
+    tasks,
+    {
+      type: "matrix",
+      matrix: {
+        x: {
+          id: "x-tags",
+          title: "Tags",
+          buckets: [
+            { id: "b-work", title: "Work", when: { tags: ["#work"] } },
+            { id: "b-personal", title: "Personal", when: { tags: ["#personal"] } },
+          ],
+        },
+        y: {
+          id: "y-status",
+          title: "Status",
+          buckets: [
+            { id: "s-todo", title: "TODO", when: { status: "todo" } },
+            { id: "s-done", title: "Done", when: { status: "done" } },
+          ],
+        },
+        unmatched: "show",
+        multiMatch: "first",
+        showEmptyBuckets: false,
+      },
+    },
+    1,
+  );
+
+  assert.equal(model.type, "matrix");
+
+  // xAxis.buckets should only contain "Work" — "Personal" has no visible cells
+  assert.equal(model.xAxis.buckets.length, 1, "xAxis only has 1 visible bucket when showEmptyBuckets=false");
+  assert.equal(model.xAxis.buckets[0].id, "b-work");
+  assert.equal(model.xAxis.buckets[0].title, "Work");
+
+  // yAxis.buckets should only contain "TODO" — "Done" has no visible cells
+  assert.equal(model.yAxis.buckets.length, 1, "yAxis only has 1 visible bucket when showEmptyBuckets=false");
+  assert.equal(model.yAxis.buckets[0].id, "s-todo");
+  assert.equal(model.yAxis.buckets[0].title, "TODO");
+
+  // Axis id and title are preserved
+  assert.equal(model.xAxis.id, "x-tags");
+  assert.equal(model.xAxis.title, "Tags");
+  assert.equal(model.yAxis.id, "y-status");
+  assert.equal(model.yAxis.title, "Status");
+});
+
+test("M4: showEmptyBuckets=true — xAxis/yAxis buckets include all configured buckets", async () => {
+  if (compileErr) throw compileErr;
+
+  const { applyViewProjection } = await import("../test/.compiled/projection.js");
+
+  const tasks = [
+    effectiveTask({ id: "test.md:L1", title: "Work task", tags: ["#work"], status: "todo", effectiveStatus: "todo" }),
+  ];
+
+  const model = applyViewProjection(
+    tasks,
+    {
+      type: "matrix",
+      matrix: {
+        x: {
+          id: "x-tags",
+          title: "Tags",
+          buckets: [
+            { id: "b-work", title: "Work", when: { tags: ["#work"] } },
+            { id: "b-personal", title: "Personal", when: { tags: ["#personal"] } },
+          ],
+        },
+        y: {
+          id: "y-status",
+          title: "Status",
+          buckets: [
+            { id: "s-todo", title: "TODO", when: { status: "todo" } },
+            { id: "s-done", title: "Done", when: { status: "done" } },
+          ],
+        },
+        unmatched: "show",
+        multiMatch: "first",
+        showEmptyBuckets: true,
+      },
+    },
+    1,
+  );
+
+  // All buckets included when showEmptyBuckets=true
+  assert.equal(model.xAxis.buckets.length, 2, "xAxis has all 2 buckets with showEmptyBuckets=true");
+  assert.equal(model.xAxis.buckets[0].id, "b-work");
+  assert.equal(model.xAxis.buckets[1].id, "b-personal");
+
+  assert.equal(model.yAxis.buckets.length, 2, "yAxis has all 2 buckets with showEmptyBuckets=true");
+  assert.equal(model.yAxis.buckets[0].id, "s-todo");
+  assert.equal(model.yAxis.buckets[1].id, "s-done");
+});
+
+test("M4: showEmptyBuckets=false — all cells empty → both axes have empty buckets", async () => {
+  if (compileErr) throw compileErr;
+
+  const { applyViewProjection } = await import("../test/.compiled/projection.js");
+
+  const tasks = [
+    effectiveTask({ id: "test.md:L1", title: "No match", tags: [], status: "todo", effectiveStatus: "todo" }),
+  ];
+
+  const model = applyViewProjection(
+    tasks,
+    {
+      type: "matrix",
+      matrix: {
+        x: {
+          id: "x-tags",
+          title: "Tags",
+          buckets: [
+            { id: "b-work", title: "Work", when: { tags: ["#work"] } },
+          ],
+        },
+        y: {
+          id: "y-status",
+          title: "Status",
+          buckets: [
+            { id: "s-done", title: "Done", when: { status: "done" } },
+          ],
+        },
+        unmatched: "show",
+        multiMatch: "first",
+        showEmptyBuckets: false,
+      },
+    },
+    1,
+  );
+
+  assert.equal(model.cells.length, 0, "No visible cells");
+  // When all cells are empty, axis buckets should be empty too
+  assert.equal(model.xAxis.buckets.length, 0, "xAxis buckets empty when all cells are hidden");
+  assert.equal(model.yAxis.buckets.length, 0, "yAxis buckets empty when all cells are hidden");
+  // Axis id/title still preserved
+  assert.equal(model.xAxis.id, "x-tags");
+  assert.equal(model.xAxis.title, "Tags");
+  assert.equal(model.yAxis.id, "y-status");
+  assert.equal(model.yAxis.title, "Status");
+});
+
+test("M4: showEmptyBuckets=false — mixed visibility: some rows visible, some columns hidden", async () => {
+  if (compileErr) throw compileErr;
+
+  const { applyViewProjection } = await import("../test/.compiled/projection.js");
+
+  // Two tasks: one matches Work×TODO, one matches Personal×TODO
+  // Work column has content, Personal also has content (via task L2)
+  // But Done row has no content in either column → yAxis should exclude Done
+  const tasks = [
+    effectiveTask({ id: "test.md:L1", title: "Work todo", tags: ["#work"], status: "todo", effectiveStatus: "todo" }),
+    effectiveTask({ id: "test.md:L2", title: "Personal todo", tags: ["#personal"], status: "todo", effectiveStatus: "todo" }),
+  ];
+
+  const model = applyViewProjection(
+    tasks,
+    {
+      type: "matrix",
+      matrix: {
+        x: {
+          id: "x-tags",
+          title: "Tags",
+          buckets: [
+            { id: "b-work", title: "Work", when: { tags: ["#work"] } },
+            { id: "b-personal", title: "Personal", when: { tags: ["#personal"] } },
+            { id: "b-none", title: "None", when: { tags: ["#nonexistent"] } },
+          ],
+        },
+        y: {
+          id: "y-status",
+          title: "Status",
+          buckets: [
+            { id: "s-todo", title: "TODO", when: { status: "todo" } },
+            { id: "s-done", title: "Done", when: { status: "done" } },
+          ],
+        },
+        unmatched: "show",
+        multiMatch: "first",
+        showEmptyBuckets: false,
+      },
+    },
+    1,
+  );
+
+  // Cells: Work×TODO + Personal×TODO = 2 non-empty, Done row hidden, "None" col hidden
+  assert.equal(model.cells.length, 2, "2 non-empty cells visible");
+
+  // xAxis: only Work and Personal columns have visible cells; "None" is hidden
+  assert.equal(model.xAxis.buckets.length, 2, "xAxis has 2 visible buckets");
+  const xIds = model.xAxis.buckets.map((b) => b.id).sort();
+  assert.deepEqual(xIds, ["b-personal", "b-work"]);
+
+  // yAxis: only TODO row has visible cells; Done is hidden
+  assert.equal(model.yAxis.buckets.length, 1, "yAxis has 1 visible bucket");
+  assert.equal(model.yAxis.buckets[0].id, "s-todo");
+});
+
+test("M4: showEmptyBuckets=false — axis metadata unchanged when all cells have content", async () => {
+  if (compileErr) throw compileErr;
+
+  const { applyViewProjection } = await import("../test/.compiled/projection.js");
+
+  // Every cell has at least one task — no filtering needed
+  const tasks = [
+    effectiveTask({ id: "test.md:L1", title: "Work todo", tags: ["#work"], status: "todo", effectiveStatus: "todo" }),
+    effectiveTask({ id: "test.md:L2", title: "Work done", tags: ["#work"], status: "done", effectiveStatus: "done" }),
+    effectiveTask({ id: "test.md:L3", title: "Personal todo", tags: ["#personal"], status: "todo", effectiveStatus: "todo" }),
+    effectiveTask({ id: "test.md:L4", title: "Personal done", tags: ["#personal"], status: "done", effectiveStatus: "done" }),
+  ];
+
+  const model = applyViewProjection(
+    tasks,
+    {
+      type: "matrix",
+      matrix: {
+        x: {
+          id: "x-tags",
+          title: "Tags",
+          buckets: [
+            { id: "b-work", title: "Work", when: { tags: ["#work"] } },
+            { id: "b-personal", title: "Personal", when: { tags: ["#personal"] } },
+          ],
+        },
+        y: {
+          id: "y-status",
+          title: "Status",
+          buckets: [
+            { id: "s-todo", title: "TODO", when: { status: "todo" } },
+            { id: "s-done", title: "Done", when: { status: "done" } },
+          ],
+        },
+        unmatched: "show",
+        multiMatch: "first",
+        showEmptyBuckets: false,
+      },
+    },
+    1,
+  );
+
+  // All 4 cells are non-empty
+  assert.equal(model.cells.length, 4, "All 4 cells visible");
+  // Axis buckets should match configured (all have content)
+  assert.equal(model.xAxis.buckets.length, 2, "Both xAxis buckets visible");
+  assert.equal(model.yAxis.buckets.length, 2, "Both yAxis buckets visible");
+});
+
+test("M4: showEmptyBuckets=false — unmatched and multiMatch=duplicate unaffected by axis filtering", async () => {
+  if (compileErr) throw compileErr;
+
+  const { applyViewProjection } = await import("../test/.compiled/projection.js");
+
+  const tasks = [
+    effectiveTask({ id: "test.md:L1", title: "Multi-tag", tags: ["#work", "#personal"], status: "todo", effectiveStatus: "todo" }),
+    effectiveTask({ id: "test.md:L2", title: "Unmatched", tags: [], status: "todo", effectiveStatus: "todo" }),
+  ];
+
+  const model = applyViewProjection(
+    tasks,
+    {
+      type: "matrix",
+      matrix: {
+        x: {
+          id: "x-tags",
+          title: "Tags",
+          buckets: [
+            { id: "b-work", title: "Work", when: { tags: ["#work"] } },
+            { id: "b-personal", title: "Personal", when: { tags: ["#personal"] } },
+          ],
+        },
+        y: {
+          id: "y-status",
+          title: "Status",
+          buckets: [
+            { id: "s-todo", title: "TODO", when: { status: "todo" } },
+          ],
+        },
+        unmatched: "show",
+        multiMatch: "duplicate",
+        showEmptyBuckets: false,
+      },
+    },
+    1,
+  );
+
+  // multiMatch=duplicate: L1 in both Work×TODO and Personal×TODO → 2 cells
+  assert.equal(model.cells.length, 2, "2 non-empty cells with multiMatch=duplicate");
+  // Axis: both columns visible
+  assert.equal(model.xAxis.buckets.length, 2, "Both xAxis buckets visible");
+  // Unmatched: L2
+  assert.equal(model.unmatched.length, 1, "Unmatched task still present");
+  assert.equal(model.unmatched[0].id, "test.md:L2");
+});

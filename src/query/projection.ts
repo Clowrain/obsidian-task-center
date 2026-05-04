@@ -380,17 +380,31 @@ function projectMatrix(
     : tasks.filter((t) => !allCellTaskIds.has(t.id));
 
   // showEmptyBuckets: when false, hide cells with no tasks.
-  // This does not affect unmatched or multiMatch — only which cells
-  // are exposed to the rendering surface.
-  const visibleCells = mx.showEmptyBuckets === false
-    ? cells.filter((c) => c.tasks.length > 0)
-    : cells;
+  // This also filters axis bucket metadata so that only buckets
+  // contributing to at least one visible cell are exposed — empty
+  // row/column labels are not rendered.
+  const showEmpty = mx.showEmptyBuckets !== false;
+  const visibleCells = showEmpty
+    ? cells
+    : cells.filter((c) => c.tasks.length > 0);
+
+  // Derive visible axis bucket metadata from visible cells.
+  // When showEmptyBuckets=false, xAxis/yAxis.buckets should only
+  // list buckets that appear in at least one visible cell.
+  const visibleColIds = new Set(visibleCells.map((c) => c.colId));
+  const visibleRowIds = new Set(visibleCells.map((c) => c.rowId));
+  const xAxisBuckets = xBuckets
+    .filter((b) => showEmpty || visibleColIds.has(b.id))
+    .map((b) => ({ id: b.id, title: b.title }));
+  const yAxisBuckets = yBuckets
+    .filter((b) => showEmpty || visibleRowIds.has(b.id))
+    .map((b) => ({ id: b.id, title: b.title }));
 
   return {
     type: "matrix",
     cells: visibleCells,
-    xAxis: { id: mx.x.id, title: mx.x.title, buckets: xBuckets.map((b) => ({ id: b.id, title: b.title })) },
-    yAxis: { id: mx.y.id, title: mx.y.title, buckets: yBuckets.map((b) => ({ id: b.id, title: b.title })) },
+    xAxis: { id: mx.x.id, title: mx.x.title, buckets: xAxisBuckets },
+    yAxis: { id: mx.y.id, title: mx.y.title, buckets: yAxisBuckets },
     unmatched: sortTasks(unmatched, view.orderBy),
   };
 }
