@@ -712,6 +712,454 @@ test("nestUnder cross-file — task #57 runtime: production path also matches ex
   );
 });
 
+// ---------- VAL-CORE-010: writer vault.process integration ----------
+// These tests verify writer operations flow through vault.process, return
+// before/after, are idempotent (no-op when already satisfied), and preserve
+// non-target bytes.
+
+const {
+  setScheduled,
+  setDeadline,
+  markDone,
+  markDropped,
+  markUndone,
+  renameTask,
+  addTag,
+  removeTag,
+  setActual,
+  setEstimate,
+} = await import("../test/.compiled/writer.bundle.js");
+
+test("setScheduled — inject ⏳ via vault.process", async () => {
+  const initial = "daily.md\n- [ ] task\nother.md\n";
+  const file = new TFile();
+  file.path = "daily.md";
+  file.extension = "md";
+  file.stat = { mtime: 1000 };
+  let data = initial;
+  const app = {
+    vault: {
+      getAbstractFileByPath: (p) => (p === "daily.md" ? file : null),
+      process: async (_f, fn) => { data = fn(data); },
+    },
+  };
+  const task = { path: "daily.md", line: 1, rawLine: "- [ ] task" };
+  const r = await setScheduled(app, task, "2026-04-25");
+  assert.equal(r.before, "- [ ] task");
+  assert.equal(r.after, "- [ ] task ⏳ 2026-04-25");
+  assert.equal(r.unchanged, false);
+  assert.ok(data.includes("- [ ] task ⏳ 2026-04-25"));
+});
+
+test("setScheduled — no-op when already same date (idempotent)", async () => {
+  const initial = "- [ ] task ⏳ 2026-04-25";
+  const file = new TFile();
+  file.path = "f.md";
+  file.extension = "md";
+  file.stat = { mtime: 1000 };
+  let data = initial;
+  const app = {
+    vault: {
+      getAbstractFileByPath: (p) => (p === "f.md" ? file : null),
+      process: async (_f, fn) => { data = fn(data); },
+    },
+  };
+  const task = { path: "f.md", line: 0, rawLine: "- [ ] task ⏳ 2026-04-25" };
+  const r = await setScheduled(app, task, "2026-04-25");
+  assert.equal(r.unchanged, true);
+  assert.equal(data, initial);
+});
+
+test("setScheduled — clear ⏳ (date=null)", async () => {
+  const initial = "- [ ] task ⏳ 2026-04-25";
+  const file = new TFile();
+  file.path = "f.md";
+  file.extension = "md";
+  file.stat = { mtime: 1000 };
+  let data = initial;
+  const app = {
+    vault: {
+      getAbstractFileByPath: (p) => (p === "f.md" ? file : null),
+      process: async (_f, fn) => { data = fn(data); },
+    },
+  };
+  const task = { path: "f.md", line: 0, rawLine: "- [ ] task ⏳ 2026-04-25" };
+  const r = await setScheduled(app, task, null);
+  assert.equal(r.before, "- [ ] task ⏳ 2026-04-25");
+  assert.equal(r.after, "- [ ] task");
+  assert.equal(r.unchanged, false);
+  assert.equal(data, "- [ ] task");
+});
+
+test("markDone — todo → done via vault.process", async () => {
+  const initial = "- [ ] important task";
+  const file = new TFile();
+  file.path = "f.md";
+  file.extension = "md";
+  file.stat = { mtime: 1000 };
+  let data = initial;
+  const app = {
+    vault: {
+      getAbstractFileByPath: (p) => (p === "f.md" ? file : null),
+      process: async (_f, fn) => { data = fn(data); },
+    },
+  };
+  const task = { path: "f.md", line: 0, rawLine: "- [ ] important task" };
+  const r = await markDone(app, task, "2026-04-30");
+  assert.equal(r.unchanged, false);
+  assert.match(r.after, /- \[x\] .* ✅ 2026-04-30/);
+  assert.match(data, /- \[x\] .* ✅ 2026-04-30/);
+});
+
+test("markDone — already done → unchanged (idempotent)", async () => {
+  const initial = "- [x] task ✅ 2026-04-30";
+  const file = new TFile();
+  file.path = "f.md";
+  file.extension = "md";
+  file.stat = { mtime: 1000 };
+  let data = initial;
+  const app = {
+    vault: {
+      getAbstractFileByPath: (p) => (p === "f.md" ? file : null),
+      process: async (_f, fn) => { data = fn(data); },
+    },
+  };
+  const task = { path: "f.md", line: 0, rawLine: "- [x] task ✅ 2026-04-30" };
+  const r = await markDone(app, task, "2026-04-30");
+  assert.equal(r.unchanged, true);
+  assert.equal(data, initial);
+});
+
+test("markDropped — todo → dropped via vault.process", async () => {
+  const initial = "- [ ] stale task #dropped";
+  const file = new TFile();
+  file.path = "f.md";
+  file.extension = "md";
+  file.stat = { mtime: 1000 };
+  let data = initial;
+  const app = {
+    vault: {
+      getAbstractFileByPath: (p) => (p === "f.md" ? file : null),
+      process: async (_f, fn) => { data = fn(data); },
+    },
+  };
+  const task = { path: "f.md", line: 0, rawLine: "- [ ] stale task #dropped" };
+  const r = await markDropped(app, task, "2026-05-01");
+  assert.equal(r.unchanged, false);
+  assert.match(r.after, /- \[-\] .* ❌ 2026-05-01/);
+  // Legacy #dropped tag stripped (one-way migration)
+  assert.ok(!r.after.includes("#dropped"));
+});
+
+test("markDropped — already dropped → unchanged (idempotent)", async () => {
+  const initial = "- [-] task ❌ 2026-05-01";
+  const file = new TFile();
+  file.path = "f.md";
+  file.extension = "md";
+  file.stat = { mtime: 1000 };
+  let data = initial;
+  const app = {
+    vault: {
+      getAbstractFileByPath: (p) => (p === "f.md" ? file : null),
+      process: async (_f, fn) => { data = fn(data); },
+    },
+  };
+  const task = { path: "f.md", line: 0, rawLine: "- [-] task ❌ 2026-05-01" };
+  const r = await markDropped(app, task, "2026-05-01");
+  assert.equal(r.unchanged, true);
+  assert.equal(data, initial);
+});
+
+test("markUndone — done → todo via vault.process", async () => {
+  const initial = "- [x] task ✅ 2026-04-30";
+  const file = new TFile();
+  file.path = "f.md";
+  file.extension = "md";
+  file.stat = { mtime: 1000 };
+  let data = initial;
+  const app = {
+    vault: {
+      getAbstractFileByPath: (p) => (p === "f.md" ? file : null),
+      process: async (_f, fn) => { data = fn(data); },
+    },
+  };
+  const task = { path: "f.md", line: 0, rawLine: "- [x] task ✅ 2026-04-30" };
+  const r = await markUndone(app, task);
+  assert.equal(r.unchanged, false);
+  assert.equal(r.after, "- [ ] task");
+  assert.equal(data, "- [ ] task");
+});
+
+test("markUndone — already todo → unchanged (idempotent)", async () => {
+  const initial = "- [ ] task";
+  const file = new TFile();
+  file.path = "f.md";
+  file.extension = "md";
+  file.stat = { mtime: 1000 };
+  let data = initial;
+  const app = {
+    vault: {
+      getAbstractFileByPath: (p) => (p === "f.md" ? file : null),
+      process: async (_f, fn) => { data = fn(data); },
+    },
+  };
+  const task = { path: "f.md", line: 0, rawLine: "- [ ] task" };
+  const r = await markUndone(app, task);
+  assert.equal(r.unchanged, true);
+  assert.equal(data, initial);
+});
+
+test("renameTask — renames title, preserves metadata", async () => {
+  const initial = "- [ ] old title #tag ⏳ 2026-04-25 [estimate:: 30m]";
+  const file = new TFile();
+  file.path = "f.md";
+  file.extension = "md";
+  file.stat = { mtime: 1000 };
+  let data = initial;
+  const app = {
+    vault: {
+      getAbstractFileByPath: (p) => (p === "f.md" ? file : null),
+      process: async (_f, fn) => { data = fn(data); },
+    },
+  };
+  const task = { path: "f.md", line: 0, rawLine: initial };
+  const r = await renameTask(app, task, "new title");
+  assert.equal(r.unchanged, false);
+  assert.match(r.after, /- \[ \] new title #tag ⏳ 2026-04-25 \[estimate:: 30m\]/);
+});
+
+test("renameTask — no-op when same title (idempotent)", async () => {
+  const initial = "- [ ] unchanged #tag";
+  const file = new TFile();
+  file.path = "f.md";
+  file.extension = "md";
+  file.stat = { mtime: 1000 };
+  let data = initial;
+  const app = {
+    vault: {
+      getAbstractFileByPath: (p) => (p === "f.md" ? file : null),
+      process: async (_f, fn) => { data = fn(data); },
+    },
+  };
+  const task = { path: "f.md", line: 0, rawLine: initial };
+  const r = await renameTask(app, task, "unchanged");
+  assert.equal(r.unchanged, true);
+  assert.equal(data, initial);
+});
+
+test("addTag — adds new tag via vault.process", async () => {
+  const initial = "- [ ] task #existing";
+  const file = new TFile();
+  file.path = "f.md";
+  file.extension = "md";
+  file.stat = { mtime: 1000 };
+  let data = initial;
+  const app = {
+    vault: {
+      getAbstractFileByPath: (p) => (p === "f.md" ? file : null),
+      process: async (_f, fn) => { data = fn(data); },
+    },
+  };
+  const task = { path: "f.md", line: 0, rawLine: initial };
+  const r = await addTag(app, task, "newtag");
+  assert.equal(r.unchanged, false);
+  assert.match(r.after, /#existing/);
+  assert.match(r.after, /#newtag/);
+});
+
+test("addTag — no-op when tag already present (idempotent)", async () => {
+  const initial = "- [ ] task #existing";
+  const file = new TFile();
+  file.path = "f.md";
+  file.extension = "md";
+  file.stat = { mtime: 1000 };
+  let data = initial;
+  const app = {
+    vault: {
+      getAbstractFileByPath: (p) => (p === "f.md" ? file : null),
+      process: async (_f, fn) => { data = fn(data); },
+    },
+  };
+  const task = { path: "f.md", line: 0, rawLine: initial };
+  const r = await addTag(app, task, "existing");
+  assert.equal(r.unchanged, true);
+  assert.equal(data, initial);
+});
+
+test("removeTag — removes tag via vault.process", async () => {
+  const initial = "- [ ] task #stale #keep";
+  const file = new TFile();
+  file.path = "f.md";
+  file.extension = "md";
+  file.stat = { mtime: 1000 };
+  let data = initial;
+  const app = {
+    vault: {
+      getAbstractFileByPath: (p) => (p === "f.md" ? file : null),
+      process: async (_f, fn) => { data = fn(data); },
+    },
+  };
+  const task = { path: "f.md", line: 0, rawLine: initial };
+  const r = await removeTag(app, task, "#stale");
+  assert.equal(r.unchanged, false);
+  assert.ok(!r.after.includes("#stale"));
+  assert.match(r.after, /#keep/);
+});
+
+test("removeTag — no-op when tag not present (idempotent)", async () => {
+  const initial = "- [ ] task #keep";
+  const file = new TFile();
+  file.path = "f.md";
+  file.extension = "md";
+  file.stat = { mtime: 1000 };
+  let data = initial;
+  const app = {
+    vault: {
+      getAbstractFileByPath: (p) => (p === "f.md" ? file : null),
+      process: async (_f, fn) => { data = fn(data); },
+    },
+  };
+  const task = { path: "f.md", line: 0, rawLine: initial };
+  const r = await removeTag(app, task, "#absent");
+  assert.equal(r.unchanged, true);
+  assert.equal(data, initial);
+});
+
+test("setDeadline — inject 📅 via vault.process", async () => {
+  const initial = "- [ ] task";
+  const file = new TFile();
+  file.path = "f.md";
+  file.extension = "md";
+  file.stat = { mtime: 1000 };
+  let data = initial;
+  const app = {
+    vault: {
+      getAbstractFileByPath: (p) => (p === "f.md" ? file : null),
+      process: async (_f, fn) => { data = fn(data); },
+    },
+  };
+  const task = { path: "f.md", line: 0, rawLine: "- [ ] task" };
+  const r = await setDeadline(app, task, "2026-05-15");
+  assert.equal(r.before, "- [ ] task");
+  assert.equal(r.after, "- [ ] task 📅 2026-05-15");
+  assert.equal(r.unchanged, false);
+});
+
+test("setDeadline — no-op when already same date (idempotent)", async () => {
+  const initial = "- [ ] task 📅 2026-05-15";
+  const file = new TFile();
+  file.path = "f.md";
+  file.extension = "md";
+  file.stat = { mtime: 1000 };
+  let data = initial;
+  const app = {
+    vault: {
+      getAbstractFileByPath: (p) => (p === "f.md" ? file : null),
+      process: async (_f, fn) => { data = fn(data); },
+    },
+  };
+  const task = { path: "f.md", line: 0, rawLine: initial };
+  const r = await setDeadline(app, task, "2026-05-15");
+  assert.equal(r.unchanged, true);
+  assert.equal(data, initial);
+});
+
+test("setActual — inject [actual::] via vault.process", async () => {
+  const initial = "- [ ] task";
+  const file = new TFile();
+  file.path = "f.md";
+  file.extension = "md";
+  file.stat = { mtime: 1000 };
+  let data = initial;
+  const app = {
+    vault: {
+      getAbstractFileByPath: (p) => (p === "f.md" ? file : null),
+      process: async (_f, fn) => { data = fn(data); },
+    },
+  };
+  const task = { path: "f.md", line: 0, rawLine: "- [ ] task", actual: 0 };
+  const r = await setActual(app, task, 90);
+  assert.equal(r.unchanged, false);
+  assert.match(r.after, /\[actual:: 1h30m\]/);
+});
+
+test("setEstimate — inject [estimate::] via vault.process", async () => {
+  const initial = "- [ ] task";
+  const file = new TFile();
+  file.path = "f.md";
+  file.extension = "md";
+  file.stat = { mtime: 1000 };
+  let data = initial;
+  const app = {
+    vault: {
+      getAbstractFileByPath: (p) => (p === "f.md" ? file : null),
+      process: async (_f, fn) => { data = fn(data); },
+    },
+  };
+  const task = { path: "f.md", line: 0, rawLine: "- [ ] task" };
+  const r = await setEstimate(app, task, 30);
+  assert.equal(r.unchanged, false);
+  assert.match(r.after, /\[estimate:: 30m\]/);
+});
+
+test("setEstimate — clear (minutes=null) via vault.process", async () => {
+  const initial = "- [ ] task [estimate:: 30m]";
+  const file = new TFile();
+  file.path = "f.md";
+  file.extension = "md";
+  file.stat = { mtime: 1000 };
+  let data = initial;
+  const app = {
+    vault: {
+      getAbstractFileByPath: (p) => (p === "f.md" ? file : null),
+      process: async (_f, fn) => { data = fn(data); },
+    },
+  };
+  const task = { path: "f.md", line: 0, rawLine: initial };
+  const r = await setEstimate(app, task, null);
+  assert.equal(r.unchanged, false);
+  assert.ok(!r.after.includes("estimate::"));
+});
+
+// ---------- VAL-CORE-011: invalid nest rejection ----------
+
+test("nestUnder — self-nest throws invalid_nest", async () => {
+  const file = new TFile();
+  file.path = "f.md";
+  file.extension = "md";
+  file.stat = { mtime: 1000 };
+  const task = {
+    id: "f.md:L0",
+    path: "f.md",
+    line: 0,
+    indent: "",
+    rawLine: "- [ ] self",
+    parentLine: null,
+  };
+  const app = {
+    vault: {
+      getAbstractFileByPath: () => file,
+      process: async () => {},
+    },
+  };
+  await assert.rejects(
+    () => nestUnder(app, task, task),
+    (err) => err.code === "invalid_nest" && /itself/i.test(err.message),
+  );
+});
+
+test("planSameFileNest — rejects descendant-as-parent nest (cycle guard)", () => {
+  const lines = [
+    "- [ ] Parent",
+    "    - [ ] Child",
+    "        - [ ] Grandchild",
+  ];
+  assert.throws(
+    () => planSameFileNest(lines, /*childLine*/ 0, /*childIndent*/ 0, /*parent*/ { line: 2, indentLen: 8 }),
+    (err) => err.code === "invalid_nest" && /descendant/i.test(err.message),
+  );
+});
+
 test("addTask(parent) — task #70 runtime: new child matches existing TAB-indented children", async () => {
   const initial =
     "- [ ] A_parent ⏳ 2026-04-26\n" +
