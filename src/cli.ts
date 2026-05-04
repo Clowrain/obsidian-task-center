@@ -28,6 +28,15 @@ import { deriveEffectiveTasks, type EffectiveTask } from "./task-tree";
 // `TaskCache`. Write verbs resolve refs via `cache.resolveRef`, which is
 // single-file for `path:Lnnn`. (ARCHITECTURE.md §3.3 / §5.1, #2 large-vault regression)
 
+/** Per-line result returned by {@link TaskCenterApi.drop} for cascade undo. */
+export interface DropResult {
+  path: string;
+  line: number;
+  before: string;
+  after: string;
+  unchanged: boolean;
+}
+
 export interface ListFilters {
   scheduled?: string;
   done?: string;
@@ -247,6 +256,10 @@ export class TaskCenterApi {
   // US-124: dropping a parent cascades to its `todo` descendants — already
   // completed children are preserved so history isn't overwritten with `[-]`.
   // see USER_STORIES.md
+  //
+  // fix-m4-abandon-undo-cascade: returns `results` array with one entry per
+  // affected line so DnD/tray abandon callers can push a multi-op undo entry
+  // that restores parent + all cascaded children atomically.
   async drop(id: string, cascade = true) {
     const task = await this.cache.resolveRef(id);
     if (!task) throw new TaskWriterError("not_found", id);
@@ -261,11 +274,25 @@ export class TaskCenterApi {
     const targets = [task, ...descendants];
     // Drop bottom-up so descending line numbers stay stable across each mutation
     targets.sort((a, b) => b.line - a.line);
-    let lastResult = await markDropped(this.app, targets[0]);
-    for (let i = 1; i < targets.length; i++) {
-      lastResult = await markDropped(this.app, targets[i]);
+    const results: DropResult[] = [];
+    for (const t of targets) {
+      const r = await markDropped(this.app, t);
+      results.push({
+        path: t.path,
+        line: t.line,
+        before: r.before,
+        after: r.after,
+        unchanged: r.unchanged,
+      });
     }
-    return lastResult;
+    // Backward-compat: return first (parent) result fields at top level
+    const parentResult = results.find((r) => r.line === task.line) ?? results[results.length - 1];
+    return {
+      before: parentResult.before,
+      after: parentResult.after,
+      unchanged: parentResult.unchanged,
+      results,
+    };
   }
 
   async add(opts: {

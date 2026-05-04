@@ -2981,14 +2981,18 @@ export class TaskCenterView extends ItemView {
         const work = async () => {
           const r = await this.api.drop(id);
           if (!r.unchanged && task) {
+            // fix-m4-abandon-undo-cascade: record one UndoOp per affected
+            // line (parent + cascaded children) so Ctrl/Cmd+Z restores
+            // the entire cascade atomically.
+            const ops = (r.results ?? []).map((d) => ({
+              path: d.path,
+              line: d.line,
+              before: [d.before],
+              after: [d.after],
+            }));
             this.undoStack.push({
               label: tr("dnd.droppedUndo"),
-              ops: [{
-                path: task.path,
-                line: task.line,
-                before: [r.before],
-                after: [r.after],
-              }],
+              ops,
             });
           }
           new Notice(tr("trash.dropped"));
@@ -3517,20 +3521,28 @@ export class TaskCenterView extends ItemView {
    */
   private async swipeAction(t: ParsedTask, kind: "done" | "drop"): Promise<void> {
     try {
-      const r =
-        kind === "done" ? await this.api.done(t.id) : await this.api.drop(t.id);
-      if (!r.unchanged) {
-        this.undoStack.push({
-          label: kind === "done" ? "swipe done" : "swipe drop",
-          ops: [
-            {
-              path: t.path,
-              line: t.line,
-              before: [r.before],
-              after: [r.after],
-            },
-          ],
-        });
+      if (kind === "done") {
+        const r = await this.api.done(t.id);
+        if (!r.unchanged) {
+          this.undoStack.push({
+            label: "swipe done",
+            ops: [{ path: t.path, line: t.line, before: [r.before], after: [r.after] }],
+          });
+        }
+      } else {
+        const r = await this.api.drop(t.id);
+        if (!r.unchanged) {
+          // fix-m4-abandon-undo-cascade: record one UndoOp per affected
+          // line (parent + cascaded children) so undo restores the
+          // entire cascade atomically.
+          const ops = (r.results ?? []).map((d) => ({
+            path: d.path,
+            line: d.line,
+            before: [d.before],
+            after: [d.after],
+          }));
+          this.undoStack.push({ label: "swipe drop", ops });
+        }
       }
       new Notice(kind === "done" ? "✓ Done" : tr("trash.dropped"), 1000);
     } catch (err) {

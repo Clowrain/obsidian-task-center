@@ -1393,3 +1393,77 @@ test("addTask(parent) — task #70 runtime: new child matches existing TAB-inden
     `addTask(parent) still emitted 4-space child indent.\nGot:\n${data}`,
   );
 });
+
+// ---------- fix-m4-abandon-undo-cascade ----------
+// US-124: dropping a parent cascades to all todo children. The undo plan
+// must cover every affected line so Ctrl/Cmd+Z restores parent + cascaded
+// children atomically, while preserving children that were already done.
+test("fix-m4: cascade drop undo restores parent and todo children, preserves done children", async () => {
+  const initial = [
+    "- [ ] Parent task",
+    "    - [x] Done child ✅ 2026-05-01",
+    "    - [ ] Todo child A",
+    "        - [ ] Grandchild",
+    "    - [ ] Todo child B",
+  ];
+
+  const file = new TFile();
+  file.path = "f.md";
+  file.extension = "md";
+  file.stat = { mtime: 1000 };
+
+  let data = initial.join("\n");
+
+  const app = {
+    vault: {
+      getAbstractFileByPath: (p) => (p === "f.md" ? file : null),
+      process: async (_f, fn) => { data = fn(data); },
+    },
+  };
+
+  // Simulate cascade drop (US-124): drop parent + all todo descendants,
+  // skip already-done children. Targets in bottom-up order (line 4, 3, 2, 0).
+  const targets = [
+    { path: "f.md", line: 4, rawLine: initial[4] },   // Todo child B
+    { path: "f.md", line: 3, rawLine: initial[3] },   // Grandchild
+    { path: "f.md", line: 2, rawLine: initial[2] },   // Todo child A
+    { path: "f.md", line: 0, rawLine: initial[0] },   // Parent
+  ];
+
+  const undoOps = [];
+  for (const t of targets) {
+    const r = await markDropped(app, t, "2026-05-05");
+    if (!r.unchanged) {
+      undoOps.push({
+        path: t.path,
+        line: t.line,
+        before: [r.before],
+        after: [r.after],
+      });
+    }
+  }
+
+  // Verify all targets were dropped
+  const droppedLines = data.split("\n");
+  assert.match(droppedLines[0], /\[-\].*❌ 2026-05-05/, "Parent should be dropped");
+  assert.match(droppedLines[1], /\[x\].*✅ 2026-05-01/, "Done child preserved");
+  assert.ok(!droppedLines[1].includes("❌"), "Done child NOT dropped");
+  assert.match(droppedLines[2], /\[-\].*❌ 2026-05-05/, "Todo child A dropped");
+  assert.match(droppedLines[3], /\[-\].*❌ 2026-05-05/, "Grandchild dropped");
+  assert.match(droppedLines[4], /\[-\].*❌ 2026-05-05/, "Todo child B dropped");
+
+  // Verify 4 undo ops (one per dropped task)
+  assert.equal(undoOps.length, 4);
+
+  // Apply undo in reverse — should restore all dropped lines
+  const files = { "f.md": droppedLines };
+  const restored = applyUndoOps(files, undoOps);
+
+  assert.deepEqual(
+    restored["f.md"],
+    initial,
+    "Undo should restore parent and all cascaded children to original state",
+  );
+  // Done child must be exactly preserved (unchanged)
+  assert.equal(restored["f.md"][1], initial[1], "Done child preserved through undo");
+});
