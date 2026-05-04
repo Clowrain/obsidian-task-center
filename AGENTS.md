@@ -1,161 +1,134 @@
 # obsidian-task-center
 
 一个 Obsidian 插件：周/月视图 + 父子任务渲染 + 自然语言 Quick Add + 移动端手势。
-SSOT 文档：`USER_STORIES.md`（产品需求） + `UX.md`（视觉规范） + `ARCHITECTURE.md`（架构）。
+
+项目的三份核心文档：
+
+- `USER_STORIES.md`：唯一产品需求来源
+- `UX.md`：界面与交互规范
+- `ARCHITECTURE.md`：技术架构与实现边界
 
 ## 元规则
 
-1. 永远中文回复
-2. 改完代码先 `pnpm build`（esbuild）+ 跑 e2e（WebDriverIO，跑通后再 push）
-3. **不写一次性脚本**（mjs / sh / md）—— 一次性的活直接执行
-4. **测试要高质量**——单元 + e2e 双保险
-5. `commit` 中文 conventional：`<type>(<scope>): <description>`，type ∈ feat/fix/chore/upgrade/docs
+1. 永远中文回复。
+2. 先文档，后代码。没有完成需求与设计收敛前，不进入实现。
+3. 不写一次性脚本（`mjs` / `sh` / 临时 `md`）。一次性的活直接执行。
+4. 所有实现都要能回溯到用户故事，不做“感觉有用”的游离开发。
+5. commit message 使用中文 conventional：`<type>(<scope>): <description>`，其中 `type ∈ feat/fix/chore/upgrade/docs`。
 
 ## 项目命令
 
 - 开发：`pnpm dev`
 - 构建：`pnpm build`
-- e2e：`pnpm e2e`（WebDriverIO，需要 Obsidian 实例）
 - 单测：`pnpm test`
+- e2e：`pnpm e2e`
 
-## 团队角色
+## 工作流
 
-- @PM —— PM / 产品设计，定 USER_STORIES.md + UX.md
-- @Engineer —— 全栈，实现新功能 + bug fix
-- @Reviewer —— code reviewer，把关 PR
-- @CTO —— CTO / 架构 / 协调
+这个项目的默认顺序是：
 
-# 开发流程（2026-04-25 起强制）
+1. 先写或修改 `USER_STORIES.md`
+2. 再从用户故事推出 `UX.md`
+3. 再从用户故事和 UX 收敛 `ARCHITECTURE.md`
+4. 最后才写代码、补测试、验证行为
 
-由 @CTO 全员落地，违反由 @Reviewer 在 review 时拦。
+禁止跳过前面的文档阶段，直接讨论实现细节或直接改代码，除非任务本身就是纯修复已有实现中的明确 bug。
 
-## 三类任务，三种节奏
+## 1. 用户故事优先
 
-### 1. Bug fix → 严格 TDD（必须 test-first）
+任何功能开发先落到 `USER_STORIES.md`，并以用户视角描述：
 
-任何 task 的目标是"修一个已发现的行为偏差"（user-reported bug、e2e fail、回归）：
+- 谁在什么场景下要完成什么事
+- 为什么这件事有价值
+- 成功结果是什么
+- 明确边界和非目标
 
-1. **第一个 commit：仅一个 failing test** —— 重现 bug 的最短 e2e / 单测。CI 上这条必须 fail（红）。reviewer 看 git log 能看到"先红"。
-2. **第二个 commit：fix 让 test 转绿**。reviewer 看 git log 看到"后绿"。
-3. fix commit 不允许带其它无关改动。
-4. PR 描述里贴 git log 截图证明先红后绿。
+只有当用户故事足够清晰、可验收、无明显冲突时，才进入 UI 设计。
 
-理由：bug 不会回归的唯一保证是有一个**能 fail** 的自动测试；先写 fix 再补的测试很容易"测了个寂寞"。
+## 2. 由用户故事推出 UI
 
-#### 1a. 测试与实现作者分离（2026-04-26 起，分层强制）
+`UX.md` 不是独立发挥，而是用户故事的界面表达。写 UI 方案时要回答：
 
-维护者 + reviewer + CTO + Reviewer 分歧澄清后落地（见 `#project-thread` thread）：
+- 每个用户故事在界面上的入口是什么
+- 用户的主路径和关键分支是什么
+- 哪些状态需要可视化：空状态、加载态、错误态、选中态、拖拽态、手势反馈等
+- 桌面端与移动端的交互是否一致，若不一致，差异是什么
 
-**默认（Engineer 自己红绿）适用**：普通 bug fix（单点行为偏差，影响面小，不涉及 breaking / 用户反复报）.
+如果一个 UI 决策无法映射回具体用户故事，就说明它还不该进入规范。
 
-**Reviewer 先写红测，Engineer 只写绿（强制）适用**：
-- 高风险 bug（影响发版 / 数据丢失 / 用户报多次）
-- 用户反复报的同类 bug（说明 implementer 测试 mental model 漏掉了某些 axes）
-- breaking change（schema / settings 移除 / API 改 → 任何会让老用户失败的改动）
+## 3. 由故事和 UI 推出架构
 
-**Reviewer first-test 流程**：
-1. Reviewer 写 red commit + push → **CI 自验**（不需要 Engineer 介入红阶段）.
-   - red commit message 必须写清"**预期失败点**"：断言命中哪个行为 / 当前源码为什么过不了 / CI 应该红在哪个测试名（**reviewer hard requirement #1**）.
-2. CI 红 → Reviewer ack Engineer 接绿. CI 绿 → Reviewer 自己 iterate（说明测试错或 bug 不存在），不丢给 Engineer.
-3. Engineer 写 green commit + push → CI 全绿 → 进 in_review.
-4. Reviewer green review 重点变成"**实现是否绕过/弱化测试**"——选择器是否绑死实现细节、fixture 是否偏离用户路径、断言是否只验证存在不验证行为（**reviewer hard requirement #2**）. 不只是 "实现过了测试" 这层 surface.
+`ARCHITECTURE.md` 只解决“如何支撑需求和交互”，不抢在前面主导产品。
 
-**Reviewer first-test 不要做的事**：
-- "无法自己验证 red 是否真的红" 是 false constraint —— CI 是免费独立验证器，push 即跑.
-- "选择器/vault 路径写错" 是 reviewer 写测试的核心责任，不能 outsource —— grep 源码 + 复用现有 e2e 模板（`writeAndWait` / `forFlush` 等）就能验.
+架构设计至少要说明：
 
-**分层 metric**：每周 retro 统计 `Reviewer-first task / Engineer-self task` 占比. 以"高风险 / 反复报 / breaking" 为漏掉 trigger，回 retroactive 检视分类是否准确.
+- 模块边界与职责
+- 数据流与状态来源
+- 与 Obsidian API 的交互方式
+- 哪些能力要做成可测试的纯逻辑，哪些是视图层适配
+- 哪些约束来自移动端、性能、兼容性或插件生命周期
 
-### 2. New feature → test-alongside（必须有，commit 顺序不限）
+如果某个技术方案不能明显支撑用户故事或 UX，就不应进入架构正文。
 
-新增 spec 行为（USER_STORIES 里新 US-xxx 或 PRD 新功能）：
+## 4. 最后才是代码
 
-1. PR 必须包含覆盖新 spec 的 e2e / 单测。
-2. 测试源里必须 grep 到 `US-xxx` 字面引用（让 spec audit 可机器化）。
-3. PR 描述里列出新 US 编号 + 对应测试 file:line。
+只有在用户故事、UX、架构三者已经对齐后，才进入实现。
 
-### 3. Refactor → 已有测试兜底
+实现阶段要求：
 
-不改变行为，只重组代码：
+- 代码必须对应已有用户故事
+- 新功能必须补测试，优先覆盖关键用户路径
+- UI 相关改动除了行为验证，还要验证视觉结果
+- 改完代码先 `pnpm build`，再跑相关测试；涉及真实交互的改动要跑 `pnpm e2e`
 
-1. 跑现有完整测试套件，必须全绿。
-2. 触碰的代码段没有测试覆盖，**先单独 commit 加覆盖（不改行为）**，再 refactor。
-3. 不允许"refactor 顺手改一点行为"——发现行为问题先停、起 bug fix task、走 TDD。
+## 任务分类
 
-## UI / 视觉变更
+### 新功能
 
-代码 e2e 不能验证"长得好不好看"。任何 UI / 视觉相关 task：
+先改文档，再改代码：
 
-1. fix push 之后，task assignee 必须在 task thread 贴**视觉 evidence** —— Playwright screenshot diff 或人工截图。
-2. PM 在 in_review → done 之前必须看过这条 evidence。"代码 review pass + e2e green" 不再是 PM 验收充要条件。
-3. 短期：人工截图兜底；中期：Playwright screenshot baseline diff 标准化。
+1. 更新 `USER_STORIES.md`
+2. 更新 `UX.md`
+3. 更新 `ARCHITECTURE.md`
+4. 实现代码与测试
 
-## Reviewer (@Reviewer) 的把关清单
+测试里应能看出对应的用户故事编号或场景描述。
 
-- bug fix：检查 git log 是否有"failing test → fix" 两个独立 commit；没有 → 直接打回重做。
-- feature：PR 引用对应 US-xxx + 有测试 grep 证明。
-- refactor：CI 完整套件 green + 不夹杂行为变化。
-- UI：task thread 有 visual evidence + PM 签过。
+### Bug 修复
 
-### Reviewer PASS 检查点强制留痕（2026-04-26 起）
+如果是“现有行为偏离既有用户故事 / 既有 UI / 既有架构”的 bug，可以直接进入修复，但仍要先确认依据来自哪份文档。
 
-每次 Reviewer 给 PR / task PASS，**必须在对应 task thread 留一条检查点消息**，三栏：
-1. **审了什么**（具体 file:line 或函数名 / commit hash / 测试 spec name）
-2. **哪些边界已验证**（穷举边界场景，每条标 ✓ / 仅 spot-check / 未覆盖）
-3. **哪些没看 / 受限假设**（明确说"未跑 e2e 因为本地缺 OBSIDIAN beta 凭证" 这类受限项）
+要求：
 
-**为什么强制**：reviewer 默认低 visibility，PASS 没有可回溯的检查记录就等于 rubber stamp. 如果一个 bug 从 PASS 的 PR 漏出，团队需要能 trace Reviewer 当时是否真的看了相关路径.
+1. 先写一个能复现问题的失败测试
+2. 再修复实现让测试转绿
+3. 修复过程中如果发现其实是需求不清，不要硬修，先回到文档
 
-**执行**：没有检查点的 PASS 不算 PASS，PM 不接受这种 in_review → done 转换. 由 @CTO 周复盘统计"有检查点 PASS 占比"，未达 100% retro 升级.
+### 重构
 
-argv-style false-positive（如 task #25 release argv[1] case）不影响这条规则，撤回时同样在 thread 留"撤回原因 + 我误判了什么"的一行说明.
+重构不改变行为，只整理实现。
 
-## 团队工作纪律（跨项目流程，2026-04-26 起）
+要求：
 
-reviewer 拍措辞（task #7/#8 audit），@CTO 落地，本仓库 mirror 适用部分。it-infra/CLAUDE.md 是主文档.
+1. 不得偷偷改变用户可见行为
+2. 依赖已有测试兜底
+3. 如果触及的区域没有测试，先补覆盖，再重构
 
-### 1. 诊断顺序
+## 测试要求
 
-用户报"X 挂了"，第一步看 **X 自身日志 / 健康状态**（dev console / e2e log / 控制台输出 / network tab），再看上下游（Obsidian API / 插件版本 / vault 状态）.
+- 单测用于保护纯逻辑、边界条件、数据转换
+- e2e 用于保护真实用户路径、Obsidian 集成、交互回归
+- UI 改动不能只看测试通过，还要确认界面结果符合 `UX.md`
 
-诊断 thread 必须分三栏：**事实证据** / **假说** / **已反驳**. 未验证假说不能写成根因；写"目前最强解释是 X，证据 Y/Z 支撑，待 W 验证"。
+测试不是装饰；测试的目标是证明用户故事真的被满足。
 
-出处：2026-04-26 task #25 e2e fail 我假设是 TZ-mismatch（之前 task #23 模板套用），Engineer 复现真根因是 Sunday-week-boundary。
+## 代理执行准则
 
-### 2. memory / docs 状态标签
+在这个仓库里工作时，默认按下面的顺序思考：
 
-`docs/audit/` / 复盘文档 / 决策记录顶部必须标状态：`已证实` / `未证实` / `已推翻，见 ...` / `已废弃，见 ...`. 结论改变时追加勘误段，不静默覆盖。
+1. 先确认这次任务对应哪个用户故事
+2. 再确认 UI 是否已经定义清楚
+3. 再确认架构是否已经允许这样做
+4. 最后才决定如何实现
 
-### 3. 破坏性操作 last-call
-
-执行**改变现状不可立即回滚**的动作前，thread 发"最后取证窗口"五栏（范围 / 命令 / 影响 / 回滚点 / 等待对象）。
-
-涵盖：发版 tag push / `npm version major` / breaking change merge / settings schema 改 / data.json 结构改 / 发版 commit force push.
-
-### 4. 部署入口清单
-
-本仓库 deploy 入口：
-- `.github/workflows/release.yml` —— push **strict semver tag** `0.x.y`（**无 `v` 前缀，无 `-beta` 等 pre-release 后缀**，正则 `[0-9]+.[0-9]+.[0-9]+`）触发 pre-flight gate (typecheck + lint + unit + e2e + tag↔manifest 对齐) → 创建 GitHub Release → 上传 `main.js` / `manifest.json` / `styles.css`. 推 `v0.x.y` 不会触发，只会被静默忽略.
-- `npm version patch/minor/major` —— 本地 bump 版本 + 自动 git tag（npm 默认会加 `v` 前缀，**必须 `npm version --no-git-tag-version` 然后手动 tag 无 v**，或 npm config `tag-version-prefix=""`），配合 `git push --follow-tags`
-- 手动 `gh release create` —— 紧急回退路径，需 `release.yml` 失败后才走
-
-改 release 流程前先在 thread 写"我准备改 X gate，旁路 Y/Z 是否仍 active？"，等确认。
-
-### 5. Reviewer PASS 检查点
-
-见上方 `### Reviewer PASS 检查点强制留痕（2026-04-26 起）`。本规则与跨项目流程同根。
-
----
-
-**生效**：2026-04-26 13:00 起.
-**违反处理**：第一次 @Reviewer 标红打回；第二次 @CTO / platform lead 在 #management + retro 升级.
-
-## CTO (@CTO) 的把关清单
-
-- 接 task 时 review 是否分对类（bug / feature / refactor）。分错的 task thread 立刻纠正。
-- 每周日 周复盘检视违反次数 + 改进流程。
-
----
-
-**生效**：2026-04-25 23:35 起，所有 project agent 在所有项目的开发任务。
-**违反处理**：第一次 @Reviewer 标红打回；第二次 @CTO 在 #management 提出。
+如果发现三份文档互相冲突，优先停下来修正文档，不要直接用代码“拍板”。
