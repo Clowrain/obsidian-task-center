@@ -2085,14 +2085,14 @@ export class TaskCenterView extends ItemView {
           });
         }
         if (metric.type === "top_n") {
-          const fieldInput = row.createEl("input", {
+          const byInput = row.createEl("input", {
             type: "text",
             placeholder: "tags",
             cls: "bt-query-editor-summary-field-input",
           });
-          fieldInput.value = metric.field ?? "";
-          fieldInput.addEventListener("input", () => {
-            updateMetricInDraft(i, { field: fieldInput.value.trim() || undefined });
+          byInput.value = metric.by ?? "";
+          byInput.addEventListener("input", () => {
+            updateMetricInDraft(i, { by: byInput.value.trim() || undefined });
           });
           const limitInput = row.createEl("input", {
             type: "number",
@@ -2203,7 +2203,7 @@ export class TaskCenterView extends ItemView {
         if (denEl?.value.trim()) newMetric.denominator = denEl.value.trim();
       }
       if (selType === "top_n") {
-        if (fieldEl?.value.trim()) newMetric.field = fieldEl.value.trim();
+        if (fieldEl?.value.trim()) newMetric.by = fieldEl.value.trim();
         if (limitEl?.value && Number.isFinite(Number(limitEl.value))) {
           newMetric.limit = Number(limitEl.value);
         }

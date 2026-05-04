@@ -1324,3 +1324,353 @@ test("roundtrip: parseQueryDsl → stringifyQueryPreset full roundtrip", () => {
   const reparsed = parseQueryDsl(reSerialized, { name: "Full Roundtrip" });
   assert.ok(sameQueryPresetContent(parsed, reparsed));
 });
+
+// ── fix-m3-summary-topn-and-editor-path-tests ──
+
+test("VAL-CORE-009: normalizeQueryPreset preserves top_n by field as canonical grouping parameter", () => {
+  // top_n grouping must use `by`, not `field`. The GUI was writing `field`
+  // which the runtime summary (`computeTopN`) ignores in favor of `by`.
+  const preset = normalizeQueryPreset({
+    id: "sv-topn",
+    name: "Top N Test",
+    builtin: false,
+    hidden: false,
+    filters: { status: "todo" },
+    view: { type: "list" },
+    summary: [
+      { type: "top_n", by: " tags ", limit: 5 },
+    ],
+  });
+
+  assert.equal(preset.summary.length, 1);
+  assert.equal(preset.summary[0].type, "top_n");
+  assert.equal(preset.summary[0].by, "tags", "top_n by must be preserved and trimmed");
+  assert.equal(preset.summary[0].limit, 5);
+  // Verify `field` was not set — top_n canonical grouping is `by`
+  assert.equal(preset.summary[0].field, undefined, "top_n must use by, not field");
+});
+
+test("summary: [] persists through createQueryPreset", () => {
+  const p = createQueryPreset("No Summary", {
+    status: "all",
+    summary: [],
+  });
+  assert.deepEqual(p.summary, [], "explicit empty summary must persist");
+});
+
+test("summary: [] persists through normalizeQueryPreset", () => {
+  const p = normalizeQueryPreset({
+    id: "sv-empty-summary",
+    name: "Empty Summary",
+    builtin: false,
+    hidden: false,
+    filters: { status: "all" },
+    view: { type: "list" },
+    summary: [],
+  });
+  assert.deepEqual(p.summary, [], "explicit empty summary must not be replaced");
+});
+
+test("summary: undefined falls back to [] in normalizeQueryPreset", () => {
+  const p = normalizeQueryPreset({
+    id: "sv-no-summary",
+    name: "No summary key",
+    builtin: false,
+    hidden: false,
+    filters: { status: "all" },
+    view: { type: "list" },
+    // summary key intentionally omitted
+  });
+  assert.deepEqual(p.summary, [], "missing summary defaults to empty array");
+});
+
+test("summary: [] persists through upsertQueryPreset (insert and update)", () => {
+  const p1 = createQueryPreset("A", { status: "todo", summary: [{ type: "count" }] });
+  const p2 = normalizeQueryPreset({
+    id: "sv-empty",
+    name: "Empty",
+    builtin: false,
+    hidden: false,
+    filters: { status: "done" },
+    view: { type: "list" },
+    summary: [],
+  });
+
+  // Insert
+  const afterInsert = upsertQueryPreset([p1], p2);
+  assert.equal(afterInsert.length, 2);
+  const inserted = afterInsert.find((p) => p.id === "sv-empty");
+  assert.ok(inserted);
+  assert.deepEqual(inserted.summary, [], "upsert(insert) must preserve explicit empty summary");
+
+  // Update
+  const p3 = normalizeQueryPreset({
+    id: "sv-empty",
+    name: "Empty Updated",
+    builtin: false,
+    hidden: false,
+    filters: { status: "todo" },
+    view: { type: "list" },
+    summary: [],
+  });
+  const afterUpdate = upsertQueryPreset(afterInsert, p3);
+  const updated = afterUpdate.find((p) => p.id === "sv-empty");
+  assert.ok(updated);
+  assert.equal(updated.name, "Empty Updated");
+  assert.deepEqual(updated.summary, [], "upsert(update) must preserve explicit empty summary");
+});
+
+test("summary: empty array roundtrips through serialize/parse", () => {
+  const original = normalizeQueryPreset({
+    id: "sv-empty-roundtrip",
+    name: "Empty Roundtrip",
+    builtin: false,
+    hidden: false,
+    filters: { status: "all" },
+    view: { type: "list" },
+    summary: [],
+  });
+
+  const dsl = stringifyQueryPreset(original);
+  const parsed = parseQueryDsl(dsl, { name: "Empty Roundtrip" });
+  assert.deepEqual(parsed.summary, [], "empty summary must survive serialize/parse roundtrip");
+  assert.ok(sameQueryPresetContent(original, parsed), "empty-summary preset must be content-identical after roundtrip");
+});
+
+test("summary: draft merge — draft summary overrides saved when present", () => {
+  // Simulates currentQuerySnapshot merge: tabDraft?.summary ?? existing?.summary
+  const saved = createQueryPreset("Saved", {
+    status: "all",
+    summary: [{ type: "count" }],
+  });
+
+  const draft = normalizeQueryPreset({
+    ...saved,
+    summary: [{ type: "sum", field: "planned" }],
+  });
+
+  // Merge: draft wins
+  const merged = normalizeQueryPreset({
+    ...saved,
+    summary: draft.summary,
+  });
+
+  assert.equal(merged.summary.length, 1);
+  assert.equal(merged.summary[0].type, "sum");
+  assert.equal(merged.name, "Saved");
+  assert.equal(merged.id, saved.id);
+});
+
+test("summary: draft merge — draft view overrides saved when present", () => {
+  const saved = createQueryPreset("Saved", {
+    status: "all",
+    view: { type: "list" },
+  });
+
+  const draft = normalizeQueryPreset({
+    ...saved,
+    view: { type: "week" },
+  });
+
+  const merged = normalizeQueryPreset({
+    ...saved,
+    view: draft.view,
+  });
+
+  assert.equal(merged.view.type, "week");
+  assert.equal(merged.id, saved.id);
+  assert.equal(merged.name, "Saved");
+});
+
+test("summary: draft merge — explicit empty draft summary overrides saved summary", () => {
+  // When user deletes all metrics via the editor, draft.summary becomes [].
+  // The merge must use [] (draft wins), not fall back to saved summary.
+  const saved = createQueryPreset("Saved", {
+    status: "all",
+    summary: [{ type: "count" }, { type: "sum", field: "planned" }],
+  });
+
+  const draft = normalizeQueryPreset({
+    ...saved,
+    summary: [],
+  });
+
+  // currentQuerySnapshot uses: tabDraft?.summary ?? existing?.summary
+  // tabDraft.summary is [] (truthy), so it wins
+  const merged = normalizeQueryPreset({
+    ...saved,
+    summary: draft.summary,
+  });
+
+  assert.deepEqual(merged.summary, [], "explicit empty summary in draft must override saved summary");
+});
+
+test("summary: add/edit/remove metrics roundtrip through pure functions", () => {
+  // Simulate the editor flow:
+  // 1. Create preset with summary=[{type: "count"}]
+  // 2. Add a sum metric
+  // 3. Edit the sum metric's field
+  // 4. Add a top_n metric with `by` (not `field`)
+  // 5. Remove the count metric
+
+  // Step 1: Create
+  let preset = createQueryPreset("Metrics Test", {
+    status: "all",
+    summary: [{ type: "count" }],
+  });
+  assert.equal(preset.summary.length, 1);
+  assert.equal(preset.summary[0].type, "count");
+
+  // Step 2: Add sum metric
+  preset = normalizeQueryPreset({
+    ...preset,
+    summary: [...preset.summary, { type: "sum", field: "planned" }],
+  });
+  assert.equal(preset.summary.length, 2);
+  assert.equal(preset.summary[1].type, "sum");
+  assert.equal(preset.summary[1].field, "planned");
+
+  // Step 3: Edit sum field from "planned" to "actual"
+  const metrics3 = preset.summary.map((m, i) =>
+    i === 1 ? { ...m, field: "actual" } : m,
+  );
+  preset = normalizeQueryPreset({ ...preset, summary: metrics3 });
+  assert.equal(preset.summary[1].field, "actual");
+
+  // Step 4: Add top_n with `by` (NOT `field`)
+  preset = normalizeQueryPreset({
+    ...preset,
+    summary: [...preset.summary, { type: "top_n", by: "tags", limit: 5 }],
+  });
+  assert.equal(preset.summary.length, 3);
+  assert.equal(preset.summary[2].type, "top_n");
+  assert.equal(preset.summary[2].by, "tags");
+  assert.equal(preset.summary[2].limit, 5);
+  // Verify top_n does NOT have a `field` property
+  assert.equal(preset.summary[2].field, undefined, "top_n must use by, not field");
+
+  // Step 5: Remove count metric (index 0)
+  preset = normalizeQueryPreset({
+    ...preset,
+    summary: preset.summary.filter((_, i) => i !== 0),
+  });
+  assert.equal(preset.summary.length, 2);
+  assert.equal(preset.summary[0].type, "sum");
+  assert.equal(preset.summary[0].field, "actual");
+  assert.equal(preset.summary[1].type, "top_n");
+  assert.equal(preset.summary[1].by, "tags");
+
+  // Verify persistence through upsert
+  const presets = upsertQueryPreset([], preset);
+  assert.equal(presets.length, 1);
+  assert.deepEqual(presets[0].summary, preset.summary);
+});
+
+test("summary: sameQueryPresetContent detects difference across summary, view, and filters", () => {
+  const base = createQueryPreset("Base", {
+    status: "all",
+    summary: [{ type: "count" }],
+    view: { type: "list" },
+  });
+
+  // Summary differs
+  const diffSummary = createQueryPreset("B", {
+    status: "all",
+    summary: [{ type: "sum", field: "planned" }],
+    view: { type: "list" },
+  });
+  assert.equal(sameQueryPresetContent(base, diffSummary), false);
+
+  // View differs
+  const diffView = createQueryPreset("C", {
+    status: "all",
+    summary: [{ type: "count" }],
+    view: { type: "week" },
+  });
+  assert.equal(sameQueryPresetContent(base, diffView), false);
+
+  // Filters differ
+  const diffFilter = createQueryPreset("D", {
+    status: "done",
+    summary: [{ type: "count" }],
+    view: { type: "list" },
+  });
+  assert.equal(sameQueryPresetContent(base, diffFilter), false);
+
+  // Same content, different id/name — should be true
+  const sameContent = createQueryPreset("Different Name", {
+    status: "all",
+    summary: [{ type: "count" }],
+    view: { type: "list" },
+  });
+  assert.ok(sameQueryPresetContent(base, sameContent));
+});
+
+test("summary: currentQuerySnapshot merge preserves identity from saved, content from draft", () => {
+  // Full simulation of currentQuerySnapshot:
+  // - id/name/builtin/hidden from saved
+  // - view/summary from draft (when present)
+  // - filters from view state
+
+  const saved = normalizeQueryPreset({
+    id: "sv-saved-1",
+    name: "Original Name",
+    builtin: true,
+    hidden: false,
+    filters: { status: "todo", tags: ["#work"] },
+    view: { type: "list", preset: "today", orderBy: ["deadline_asc"] },
+    summary: [{ type: "count" }],
+  });
+
+  // Draft has edited view and summary
+  const draft = normalizeQueryPreset({
+    ...saved,
+    view: { type: "week" },
+    summary: [{ type: "sum", field: "planned" }],
+  });
+
+  // currentQuerySnapshot merge (identity from saved, content from draft)
+  const snapshot = normalizeQueryPreset({
+    id: saved.id,
+    name: saved.name,
+    builtin: saved.builtin,
+    hidden: saved.hidden,
+    filters: saved.filters,
+    view: draft.view,
+    summary: draft.summary,
+  });
+
+  assert.equal(snapshot.id, "sv-saved-1");
+  assert.equal(snapshot.name, "Original Name");
+  assert.equal(snapshot.builtin, true);
+  assert.equal(snapshot.hidden, false);
+  assert.deepEqual(snapshot.filters.status, ["todo"]);
+  assert.equal(snapshot.view.type, "week", "draft view wins over saved");
+  assert.equal(snapshot.summary.length, 1, "draft summary wins over saved");
+  assert.equal(snapshot.summary[0].type, "sum");
+});
+
+test("summary: currentQuerySnapshot fallback to saved when no draft exists", () => {
+  // When there is no draft, use saved view/summary
+  const saved = normalizeQueryPreset({
+    id: "sv-saved-2",
+    name: "Saved Only",
+    builtin: false,
+    hidden: false,
+    filters: { status: "all" },
+    view: { type: "month" },
+    summary: [{ type: "count" }, { type: "top_n", by: "tags", limit: 3 }],
+  });
+
+  // No draft → use saved directly
+  const snapshot = normalizeQueryPreset({
+    ...saved,
+    view: saved.view,
+    summary: saved.summary,
+  });
+
+  assert.equal(snapshot.view.type, "month");
+  assert.equal(snapshot.summary.length, 2);
+  assert.equal(snapshot.summary[1].type, "top_n");
+  assert.equal(snapshot.summary[1].by, "tags");
+});
