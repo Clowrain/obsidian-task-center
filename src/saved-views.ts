@@ -384,10 +384,18 @@ function normalizeSavedViewConfig(view: unknown): SavedViewConfig {
   const orderBy = Array.isArray(raw.orderBy)
     ? raw.orderBy.map((value) => (typeof value === "string" ? value.trim() : "")).filter(Boolean)
     : undefined;
+  const matrix = isRecord(raw.matrix) ? normalizeMatrixConfig(raw.matrix) : undefined;
+  const sections = Array.isArray(raw.sections)
+    ? raw.sections.map(normalizeQuerySection).filter((s): s is QuerySection => s !== null)
+    : undefined;
+  const tray = isRecord(raw.tray) ? normalizeQueryTray(raw.tray) : undefined;
   return {
     type,
     ...(preset ? { preset } : {}),
     ...(orderBy && orderBy.length > 0 ? { orderBy } : {}),
+    ...(sections && sections.length > 0 ? { sections } : {}),
+    ...(tray ? { tray } : {}),
+    ...(matrix ? { matrix } : {}),
   };
 }
 

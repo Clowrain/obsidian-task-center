@@ -47,6 +47,11 @@ const {
   createQueryPreset,
   deleteSavedViewById,
   isBuiltinSavedViewId,
+  fromQueryPreset,
+  toQueryPreset,
+  sameQueryPresetContent,
+  parseQueryDsl,
+  stringifyQueryPreset,
 } = await import("../test/.compiled/saved-views.js");
 
 test("US-109c: createSavedView persists the current filter conditions, not a task snapshot", () => {
@@ -567,4 +572,308 @@ test("VAL-GUI-004: snapshot normalizeQueryPreset strips unknown fields", () => {
   });
 
   assert.equal("unknownField" in preset, false);
+});
+
+// ── fix-m3-desktop-query-editor-full-dsl-roundtrip ──
+
+test("roundtrip: normalizeQueryPresetView preserves sections", () => {
+  const preset = normalizeQueryPreset({
+    id: "sv-sections",
+    name: "With sections",
+    builtin: false,
+    hidden: false,
+    filters: { status: "todo" },
+    view: {
+      type: "list",
+      sections: [
+        { id: "s1", title: "Urgent", when: { status: ["todo"], time: { deadline: "overdue" } } },
+        { id: "s2", title: "Normal", when: { status: ["todo"] }, orderBy: ["deadline_asc"], limit: 10 },
+      ],
+    },
+    summary: [],
+  });
+
+  assert.equal(preset.view.type, "list");
+  assert.ok(Array.isArray(preset.view.sections));
+  assert.equal(preset.view.sections.length, 2);
+  assert.equal(preset.view.sections[0].id, "s1");
+  assert.equal(preset.view.sections[0].title, "Urgent");
+  assert.deepEqual(preset.view.sections[0].when.status, ["todo"]);
+  assert.deepEqual(preset.view.sections[0].when.time, { deadline: "overdue" });
+  assert.equal(preset.view.sections[1].id, "s2");
+  assert.equal(preset.view.sections[1].limit, 10);
+});
+
+test("roundtrip: normalizeQueryPresetView preserves tray config", () => {
+  const preset = normalizeQueryPreset({
+    id: "sv-tray",
+    name: "With tray",
+    builtin: false,
+    hidden: false,
+    filters: { status: "todo" },
+    view: {
+      type: "week",
+      tray: {
+        enabled: true,
+        title: "Unscheduled",
+        filters: { status: ["todo"], time: { scheduled: "unscheduled" } },
+        orderBy: ["deadline_asc"],
+      },
+    },
+    summary: [],
+  });
+
+  assert.equal(preset.view.type, "week");
+  assert.ok(preset.view.tray);
+  assert.equal(preset.view.tray.enabled, true);
+  assert.equal(preset.view.tray.title, "Unscheduled");
+  assert.deepEqual(preset.view.tray.filters.status, ["todo"]);
+  assert.deepEqual(preset.view.tray.filters.time, { scheduled: "unscheduled" });
+  assert.deepEqual(preset.view.tray.orderBy, ["deadline_asc"]);
+});
+
+test("roundtrip: normalizeQueryPresetView preserves matrix config", () => {
+  const preset = normalizeQueryPreset({
+    id: "sv-matrix",
+    name: "With matrix",
+    builtin: false,
+    hidden: false,
+    filters: { status: "todo" },
+    view: {
+      type: "matrix",
+      matrix: {
+        x: {
+          id: "priority",
+          title: "Priority",
+          buckets: [
+            { id: "high", title: "High", when: { tags: ["#high"] } },
+            { id: "low", title: "Low", when: { tags: ["#low"] } },
+          ],
+        },
+        y: {
+          id: "status",
+          title: "Status",
+          buckets: [
+            { id: "active", title: "Active", when: { status: ["todo"] } },
+            { id: "done", title: "Done", when: { status: ["done"] } },
+          ],
+        },
+        unmatched: "hide",
+        multiMatch: "duplicate",
+        showEmptyBuckets: false,
+      },
+    },
+    summary: [],
+  });
+
+  assert.equal(preset.view.type, "matrix");
+  assert.ok(preset.view.matrix);
+  assert.equal(preset.view.matrix.x.id, "priority");
+  assert.equal(preset.view.matrix.x.buckets.length, 2);
+  assert.equal(preset.view.matrix.y.id, "status");
+  assert.equal(preset.view.matrix.y.buckets.length, 2);
+  assert.equal(preset.view.matrix.unmatched, "hide");
+  assert.equal(preset.view.matrix.multiMatch, "duplicate");
+  assert.equal(preset.view.matrix.showEmptyBuckets, false);
+});
+
+test("roundtrip: normalizeQueryPresetView preserves orderBy", () => {
+  const preset = normalizeQueryPreset({
+    id: "sv-orderby",
+    name: "With orderBy",
+    builtin: false,
+    hidden: false,
+    filters: { status: "todo" },
+    view: {
+      type: "list",
+      orderBy: ["deadline_asc", "created_desc"],
+    },
+    summary: [],
+  });
+
+  assert.equal(preset.view.type, "list");
+  assert.deepEqual(preset.view.orderBy, ["deadline_asc", "created_desc"]);
+});
+
+test("roundtrip: normalizeQueryPresetSummary preserves all metric types", () => {
+  const preset = normalizeQueryPreset({
+    id: "sv-summary",
+    name: "With summary",
+    builtin: false,
+    hidden: false,
+    filters: { status: "all" },
+    view: { type: "list" },
+    summary: [
+      { type: "count" },
+      { type: "sum", field: "planned", format: "duration" },
+      { type: "ratio", numerator: "actual", denominator: "estimate", format: "percent" },
+      { type: "top_n", field: "tags", limit: 5, format: "number" },
+      { type: "group_by", by: "tags" },
+    ],
+  });
+
+  assert.equal(preset.summary.length, 5);
+  assert.equal(preset.summary[0].type, "count");
+  assert.equal(preset.summary[1].type, "sum");
+  assert.equal(preset.summary[1].field, "planned");
+  assert.equal(preset.summary[1].format, "duration");
+  assert.equal(preset.summary[2].type, "ratio");
+  assert.equal(preset.summary[2].numerator, "actual");
+  assert.equal(preset.summary[2].denominator, "estimate");
+  assert.equal(preset.summary[3].type, "top_n");
+  assert.equal(preset.summary[3].field, "tags");
+  assert.equal(preset.summary[3].limit, 5);
+  assert.equal(preset.summary[4].type, "group_by");
+  assert.equal(preset.summary[4].by, "tags");
+});
+
+test("roundtrip: toQueryPreset preserves full view config through conversion", () => {
+  const flat = normalizeSavedTaskView({
+    id: "sv-flat",
+    name: "Flat with matrix",
+    builtin: false,
+    hidden: false,
+    search: "",
+    tag: "#alpha",
+    time: { scheduled: "week" },
+    status: ["todo"],
+    view: {
+      type: "matrix",
+      matrix: {
+        x: { id: "cat", title: "Category", buckets: [{ id: "a", title: "A", when: { tags: ["#a"] } }] },
+        y: { id: "risk", title: "Risk", buckets: [{ id: "high", title: "High", when: { time: { deadline: "overdue" } } }] },
+        unmatched: "show",
+        multiMatch: "first",
+        showEmptyBuckets: true,
+      },
+    },
+    summary: [{ type: "count" }, { type: "sum", field: "planned" }],
+  });
+
+  const qp = toQueryPreset(flat);
+
+  assert.equal(qp.view.type, "matrix");
+  assert.ok(qp.view.matrix);
+  assert.equal(qp.view.matrix.x.id, "cat");
+  assert.equal(qp.view.matrix.y.id, "risk");
+  assert.equal(qp.view.matrix.unmatched, "show");
+  assert.equal(qp.view.matrix.multiMatch, "first");
+  assert.equal(qp.view.matrix.showEmptyBuckets, true);
+  assert.equal(qp.summary.length, 2);
+  assert.equal(qp.summary[1].type, "sum");
+  assert.equal(qp.summary[1].field, "planned");
+});
+
+test("roundtrip: fromQueryPreset preserves full view config through conversion", () => {
+  const qp = normalizeQueryPreset({
+    id: "sv-roundtrip",
+    name: "Roundtrip",
+    builtin: false,
+    hidden: false,
+    filters: { tags: ["#alpha"], status: ["todo"], time: { scheduled: "week" } },
+    view: {
+      type: "matrix",
+      matrix: {
+        x: { id: "cat", title: "Category", buckets: [{ id: "a", title: "A", when: { tags: ["#a"] } }] },
+        y: { id: "risk", title: "Risk", buckets: [{ id: "high", title: "High", when: { time: { deadline: "overdue" } } }] },
+        unmatched: "show",
+        multiMatch: "first",
+        showEmptyBuckets: true,
+      },
+    },
+    summary: [{ type: "count" }, { type: "sum", field: "planned" }],
+  });
+
+  const flat = fromQueryPreset(qp);
+
+  assert.equal(flat.view.type, "matrix");
+  assert.ok(flat.view.matrix);
+  assert.equal(flat.view.matrix.x.id, "cat");
+  assert.equal(flat.view.matrix.y.id, "risk");
+  assert.equal(flat.view.matrix.unmatched, "show");
+  assert.equal(flat.view.matrix.multiMatch, "first");
+  assert.equal(flat.summary.length, 2);
+  assert.equal(flat.summary[1].type, "sum");
+  assert.equal(flat.summary[1].field, "planned");
+});
+
+test("roundtrip: parseQueryDsl → stringifyQueryPreset full roundtrip", () => {
+  const dsl = stringifyQueryPreset(normalizeQueryPreset({
+    id: "sv-full",
+    name: "Full Roundtrip",
+    builtin: false,
+    hidden: false,
+    filters: {
+      search: "report",
+      tags: ["#alpha", "#beta"],
+      status: ["todo", "in_progress"],
+      time: { scheduled: "week", deadline: "overdue" },
+    },
+    view: {
+      type: "matrix",
+      sections: [
+        { id: "urgent", title: "Urgent", when: { time: { deadline: "overdue" } }, limit: 5 },
+      ],
+      tray: {
+        enabled: true,
+        title: "Backlog",
+        filters: { status: ["todo"], time: { scheduled: "unscheduled" } },
+      },
+      matrix: {
+        x: { id: "pri", title: "Pri", buckets: [{ id: "high", title: "High", when: { tags: ["#high"] } }] },
+        y: { id: "stat", title: "Stat", buckets: [{ id: "open", title: "Open", when: { status: ["todo"] } }] },
+        unmatched: "hide",
+        multiMatch: "duplicate",
+        showEmptyBuckets: false,
+      },
+      orderBy: ["deadline_asc"],
+    },
+    summary: [
+      { type: "count" },
+      { type: "sum", field: "planned", format: "duration" },
+      { type: "ratio", numerator: "actual", denominator: "estimate", format: "percent" },
+      { type: "top_n", field: "tags", limit: 3 },
+      { type: "group_by", by: "tags" },
+    ],
+  }));
+
+  const parsed = parseQueryDsl(dsl, { name: "Full Roundtrip" });
+
+  assert.equal(parsed.id, "sv-full");
+  assert.equal(parsed.name, "Full Roundtrip");
+  assert.equal(parsed.filters.search, "report");
+  assert.deepEqual(parsed.filters.tags, ["#alpha", "#beta"]);
+  assert.deepEqual(parsed.filters.status, ["todo", "in_progress"]);
+  assert.deepEqual(parsed.filters.time, { scheduled: "week", deadline: "overdue" });
+
+  // View
+  assert.equal(parsed.view.type, "matrix");
+  assert.ok(parsed.view.sections);
+  assert.equal(parsed.view.sections.length, 1);
+  assert.equal(parsed.view.sections[0].id, "urgent");
+  assert.ok(parsed.view.tray);
+  assert.equal(parsed.view.tray.title, "Backlog");
+  assert.ok(parsed.view.matrix);
+  assert.equal(parsed.view.matrix.x.id, "pri");
+  assert.equal(parsed.view.matrix.y.id, "stat");
+  assert.equal(parsed.view.matrix.unmatched, "hide");
+  assert.equal(parsed.view.matrix.multiMatch, "duplicate");
+  assert.equal(parsed.view.matrix.showEmptyBuckets, false);
+  assert.deepEqual(parsed.view.orderBy, ["deadline_asc"]);
+
+  // Summary
+  assert.equal(parsed.summary.length, 5);
+  assert.equal(parsed.summary[0].type, "count");
+  assert.equal(parsed.summary[1].type, "sum");
+  assert.equal(parsed.summary[1].field, "planned");
+  assert.equal(parsed.summary[2].type, "ratio");
+  assert.equal(parsed.summary[3].type, "top_n");
+  assert.equal(parsed.summary[3].limit, 3);
+  assert.equal(parsed.summary[4].type, "group_by");
+  assert.equal(parsed.summary[4].by, "tags");
+
+  // Full re-serialize identity
+  const reSerialized = stringifyQueryPreset(parsed);
+  const reparsed = parseQueryDsl(reSerialized, { name: "Full Roundtrip" });
+  assert.ok(sameQueryPresetContent(parsed, reparsed));
 });

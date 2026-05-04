@@ -110,6 +110,12 @@ export interface SavedViewConfig {
   // which query preset semantics the user saved.
   preset?: string;
   orderBy?: string[];
+  // ARCHITECTURE.md §1.3: QuerySection — named filter groups for list views.
+  sections?: QuerySection[];
+  // ARCHITECTURE.md §1.3: QueryTray — separate query area for week/month views.
+  tray?: QueryTray;
+  // ARCHITECTURE.md §1.3: QueryPresetMatrixConfig — matrix view config.
+  matrix?: QueryPresetMatrixConfig;
 }
 
 export interface SavedViewSummaryMetric {

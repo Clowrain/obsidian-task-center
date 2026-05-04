@@ -1925,6 +1925,140 @@ export class TaskCenterView extends ItemView {
     summarySection.createDiv({ cls: "bt-query-editor-section-title", text: tr("savedViews.queryEditorSummary") });
     summarySection.createDiv({ cls: "bt-query-editor-section-note", text: tr("savedViews.queryEditorSummaryHelp") });
 
+    const summaryList = summarySection.createDiv({ cls: "bt-query-editor-summary-list" });
+    const renderSummaryMetrics = () => {
+      summaryList.empty();
+      const metrics = this.currentSavedViewSummary();
+      for (let i = 0; i < metrics.length; i++) {
+        const metric = metrics[i];
+        const row = summaryList.createDiv({ cls: "bt-query-editor-summary-row" });
+        row.dataset.summaryMetric = metric.type;
+        // Metric type label
+        const typeLabel = row.createSpan({ cls: "bt-query-editor-summary-type" });
+        switch (metric.type) {
+          case "count":
+            typeLabel.setText(tr("savedViews.summaryMetricCount"));
+            break;
+          case "sum":
+            typeLabel.setText(`${tr("savedViews.summaryMetricSum")}(${metric.field ?? "?"})`);
+            break;
+          case "ratio":
+            typeLabel.setText(`${tr("savedViews.summaryMetricRatio")}(${metric.numerator ?? "?"}/${metric.denominator ?? "?"})`);
+            break;
+          case "top_n":
+            typeLabel.setText(`${tr("savedViews.summaryMetricTopN")}(${metric.field ?? "?"}, limit=${metric.limit ?? "?"})`);
+            break;
+          case "group_by":
+            typeLabel.setText(`${tr("savedViews.summaryMetricGroupBy")}(${metric.by ?? "?"})`);
+            break;
+        }
+        // Remove button
+        const removeBtn = row.createEl("button", {
+          text: tr("savedViews.summaryRemove"),
+          cls: "bt-query-editor-summary-remove",
+        });
+        removeBtn.addEventListener("click", () => {
+          const active = this.activeSavedView();
+          const draft = this.currentQuerySnapshot(active);
+          draft.summary = draft.summary.filter((_, idx) => idx !== i);
+          this.tabDrafts.set(active.id, draft);
+          this.applySavedView(draft);
+          renderSummaryMetrics();
+        });
+      }
+    };
+    renderSummaryMetrics();
+
+    // Add metric controls
+    const addRow = summarySection.createDiv({ cls: "bt-query-editor-summary-add-row" });
+    const metricTypes: Array<{ value: QueryPresetSummaryMetric["type"]; label: string }> = [
+      { value: "count", label: tr("savedViews.summaryMetricCount") },
+      { value: "sum", label: tr("savedViews.summaryMetricSum") },
+      { value: "ratio", label: tr("savedViews.summaryMetricRatio") },
+      { value: "top_n", label: tr("savedViews.summaryMetricTopN") },
+      { value: "group_by", label: tr("savedViews.summaryMetricGroupBy") },
+    ];
+    const typeSelect = addRow.createEl("select", { cls: "bt-query-editor-summary-type-select" });
+    for (const mt of metricTypes) {
+      const option = typeSelect.createEl("option", { text: mt.label });
+      option.value = mt.value;
+    }
+
+    // Dynamic fields based on selected type
+    const fieldsRow = addRow.createDiv({ cls: "bt-query-editor-summary-fields" });
+    const updateMetricFields = () => {
+      fieldsRow.empty();
+      const selType = typeSelect.value as QueryPresetSummaryMetric["type"];
+      if (selType === "sum" || selType === "top_n") {
+        fieldsRow.createSpan({ text: tr("savedViews.summaryField") + ":", cls: "bt-query-editor-summary-field-label" });
+        const fieldInput = fieldsRow.createEl("input", { type: "text", placeholder: "planned", cls: "bt-query-editor-summary-field-input" });
+        fieldInput.dataset.summaryField = "field";
+        if (selType === "top_n") {
+          fieldsRow.createSpan({ text: tr("savedViews.summaryLimit") + ":", cls: "bt-query-editor-summary-field-label" });
+          const limitInput = fieldsRow.createEl("input", { type: "number", placeholder: "5", cls: "bt-query-editor-summary-field-input" });
+          limitInput.dataset.summaryField = "limit";
+        }
+      }
+      if (selType === "ratio") {
+        fieldsRow.createSpan({ text: tr("savedViews.summaryNumerator") + ":", cls: "bt-query-editor-summary-field-label" });
+        const numInput = fieldsRow.createEl("input", { type: "text", placeholder: "actual", cls: "bt-query-editor-summary-field-input" });
+        numInput.dataset.summaryField = "numerator";
+        fieldsRow.createSpan({ text: tr("savedViews.summaryDenominator") + ":", cls: "bt-query-editor-summary-field-label" });
+        const denInput = fieldsRow.createEl("input", { type: "text", placeholder: "estimate", cls: "bt-query-editor-summary-field-input" });
+        denInput.dataset.summaryField = "denominator";
+      }
+      if (selType === "group_by") {
+        fieldsRow.createSpan({ text: tr("savedViews.summaryBy") + ":", cls: "bt-query-editor-summary-field-label" });
+        const byInput = fieldsRow.createEl("input", { type: "text", placeholder: "tags", cls: "bt-query-editor-summary-field-input" });
+        byInput.dataset.summaryField = "by";
+      }
+    };
+    typeSelect.addEventListener("change", updateMetricFields);
+    updateMetricFields();
+
+    const addBtn = addRow.createEl("button", {
+      text: tr("savedViews.summaryAdd"),
+      cls: "bt-query-editor-summary-add-btn",
+    });
+    addBtn.addEventListener("click", () => {
+      const selType = typeSelect.value as QueryPresetSummaryMetric["type"];
+      const newMetric: QueryPresetSummaryMetric = { type: selType };
+      // Read field values
+      const fieldEl = fieldsRow.querySelector<HTMLInputElement>('[data-summary-field="field"]');
+      const limitEl = fieldsRow.querySelector<HTMLInputElement>('[data-summary-field="limit"]');
+      const numEl = fieldsRow.querySelector<HTMLInputElement>('[data-summary-field="numerator"]');
+      const denEl = fieldsRow.querySelector<HTMLInputElement>('[data-summary-field="denominator"]');
+      const byEl = fieldsRow.querySelector<HTMLInputElement>('[data-summary-field="by"]');
+
+      if (selType === "sum") {
+        if (fieldEl?.value.trim()) newMetric.field = fieldEl.value.trim();
+      }
+      if (selType === "ratio") {
+        if (numEl?.value.trim()) newMetric.numerator = numEl.value.trim();
+        if (denEl?.value.trim()) newMetric.denominator = denEl.value.trim();
+      }
+      if (selType === "top_n") {
+        if (fieldEl?.value.trim()) newMetric.field = fieldEl.value.trim();
+        if (limitEl?.value && Number.isFinite(Number(limitEl.value))) {
+          newMetric.limit = Number(limitEl.value);
+        }
+      }
+      if (selType === "group_by") {
+        if (byEl?.value.trim()) newMetric.by = byEl.value.trim();
+      }
+
+      const active = this.activeSavedView();
+      const draft = this.currentQuerySnapshot(active);
+      draft.summary = [...(draft.summary ?? []), newMetric];
+      this.tabDrafts.set(active.id, draft);
+      this.applySavedView(draft);
+      renderSummaryMetrics();
+      // Clear inputs
+      fieldsRow.querySelectorAll("input").forEach((el) => {
+        el.value = "";
+      });
+    });
+
     // ── DSL ──────────────────────────────────────────────
     const dslSection = parent.createDiv({ cls: "bt-query-editor-section" });
     dslSection.createDiv({ cls: "bt-query-editor-section-title", text: tr("savedViews.dslTitle") });
@@ -3597,8 +3731,8 @@ export class TaskCenterView extends ItemView {
         time: this.state.savedViewTime,
         status: this.state.savedViewStatus,
       },
-      view: this.currentQueryPresetViewConfig(),
-      summary: this.currentSavedViewSummary(),
+      view: existing?.view ?? this.currentQueryPresetViewConfig(),
+      summary: existing?.summary ?? this.currentSavedViewSummary(),
     });
   }
 
@@ -3622,6 +3756,18 @@ export class TaskCenterView extends ItemView {
   }
 
   private currentQueryPresetViewConfig(): QueryPresetViewConfig {
+    // Read from the active saved QueryPreset's view config (draft or saved),
+    // falling back to legacy tab-based defaults only when no saved view exists.
+    const saved = this.selectedSavedView();
+    if (saved) {
+      const draft = this.tabDrafts.get(saved.id);
+      const effective = draft ?? saved;
+      if (effective.view) return effective.view;
+    }
+    return this.defaultViewConfigForLegacyTab();
+  }
+
+  private defaultViewConfigForLegacyTab(): QueryPresetViewConfig {
     switch (this.state.tab) {
       case "week":
         return { type: "week" };
@@ -3640,6 +3786,18 @@ export class TaskCenterView extends ItemView {
   }
 
   private currentSavedViewSummary(): QueryPresetSummaryMetric[] {
+    // Read from the active saved QueryPreset's summary (draft or saved),
+    // falling back to legacy tab-based defaults only when no saved summary exists.
+    const saved = this.selectedSavedView();
+    if (saved) {
+      const draft = this.tabDrafts.get(saved.id);
+      const effective = draft ?? saved;
+      if (effective.summary && effective.summary.length > 0) return effective.summary;
+    }
+    return this.defaultSummaryForLegacyTab();
+  }
+
+  private defaultSummaryForLegacyTab(): QueryPresetSummaryMetric[] {
     if (this.state.tab === "completed") {
       return [
         { type: "count" },
