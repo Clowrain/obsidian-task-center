@@ -38,7 +38,7 @@ import type { FilterPopoverKey, TabKey, ViewState } from "./view/state";
 import { taskDisplayTags } from "./tags";
 import { formatDateFilterLabel } from "./date-filter";
 import { taskMatchesTimeToken, timeTokenAppliesToField } from "./time-filter";
-import { deriveEffectiveTasks, countTopLevel } from "./task-tree";
+import { deriveEffectiveTasks, countTopLevel, recomputeTopLevelInQuery } from "./task-tree";
 import type { EffectiveTask } from "./task-tree";
 import { applyQueryFilters } from "./query/filter";
 import { applyViewProjection } from "./query/projection";
@@ -140,22 +140,20 @@ function taskMatchesText(t: ParsedTask, q: string): boolean {
   return false;
 }
 
-function taskTimeValue(t: ParsedTask, field: SavedViewTimeField): string | null {
-  if (field === "scheduled") return t.scheduled;
-  if (field === "deadline") return t.deadline;
+function effectiveTimeValue(t: EffectiveTask, field: SavedViewTimeField): string | null {
+  if (field === "scheduled") return t.effectiveScheduled;
+  if (field === "deadline") return t.effectiveDeadline;
   if (field === "completed") return t.completed;
-  return t.created;
+  if (field === "dropped") return t.cancelled;
+  return t.effectiveCreated ?? t.created;
 }
 
-function taskMatchesTimeFilter(t: ParsedTask, field: SavedViewTimeField, token: string, weekStartsOn: 0 | 1): boolean {
+function taskMatchesTimeFilter(t: EffectiveTask, field: SavedViewTimeField, token: string, weekStartsOn: 0 | 1): boolean {
   if (!timeTokenAppliesToField(field, token)) return false;
-  return taskMatchesTimeToken(taskTimeValue(t, field), token, weekStartsOn);
-}
-
-function taskDateColumn(t: ParsedTask): string | null {
-  if (t.status === "todo") return t.inheritsTerminal ? null : t.scheduled;
-  if (t.status === "done") return t.completed;
-  return null;
+  // "unscheduled" means effective scheduled is empty
+  if (field === "scheduled" && token === "unscheduled") return t.effectiveScheduled === null;
+  if (token === "unscheduled") return effectiveTimeValue(t, field) === null;
+  return taskMatchesTimeToken(effectiveTimeValue(t, field), token, weekStartsOn);
 }
 
 export class TaskCenterView extends ItemView {
@@ -567,9 +565,10 @@ export class TaskCenterView extends ItemView {
   private renderMobileStatusRow(header: HTMLElement) {
     const row = header.createDiv({ cls: "bt-mobile-status" });
     const today = todayISO();
-    const todo = this.tasks.filter((t) => t.status === "todo" && !t.inheritsTerminal);
-    const todayCount = todo.filter((t) => t.scheduled === today).length;
-    const overdue = todo.filter((t) => t.deadline && t.deadline < today).length;
+    const effectiveTasks = this.getEffectiveTasks();
+    const todo = effectiveTasks.filter((t) => t.effectiveStatus === "todo");
+    const todayCount = todo.filter((t) => t.effectiveScheduled === today && t.isTopLevelInQuery).length;
+    const overdue = todo.filter((t) => t.effectiveDeadline && t.effectiveDeadline < today && t.isTopLevelInQuery).length;
     // task #43: same i18n keys as the desktop status bar so the two
     // surfaces stay in lock-step under any locale.
     const parts = [tr("status.today", { n: todayCount })];
@@ -1183,9 +1182,12 @@ export class TaskCenterView extends ItemView {
     const effectiveTasks = this.getEffectiveTasks();
     const today = todayISO();
     if (tab === "today") {
-      const activeTodos = effectiveTasks.filter(filter).filter((task) => task.effectiveStatus === "todo");
-      const overdueCount = activeTodos.filter((task) => task.effectiveDeadline && task.effectiveDeadline < today).length;
-      const todayScheduled = activeTodos.filter((task) => task.effectiveScheduled === today).length;
+      const activeTodos = recomputeTopLevelInQuery(
+        effectiveTasks.filter(filter).filter((task) => task.effectiveStatus === "todo"),
+      );
+      const topLevelTodos = activeTodos.filter((task) => task.isTopLevelInQuery);
+      const overdueCount = topLevelTodos.filter((task) => task.effectiveDeadline && task.effectiveDeadline < today).length;
+      const todayScheduled = topLevelTodos.filter((task) => task.effectiveScheduled === today).length;
       return overdueCount + todayScheduled;
     }
     if (tab === "week") {
@@ -1195,7 +1197,7 @@ export class TaskCenterView extends ItemView {
         const date = task.effectiveScheduled;
         return !!date && date >= weekStart && date <= weekEnd;
       });
-      return countTopLevel(weekTasks);
+      return countTopLevel(recomputeTopLevelInQuery(weekTasks));
     }
     if (tab === "month") {
       const monthStart = startOfMonth(today);
@@ -1204,19 +1206,19 @@ export class TaskCenterView extends ItemView {
         const date = task.effectiveScheduled;
         return !!date && date >= monthStart && date <= monthEnd;
       });
-      return countTopLevel(monthTasks);
+      return countTopLevel(recomputeTopLevelInQuery(monthTasks));
     }
     if (tab === "completed") {
       const completedTasks = effectiveTasks.filter(filter).filter((task) => task.effectiveStatus === "done");
-      return countTopLevel(completedTasks);
+      return countTopLevel(recomputeTopLevelInQuery(completedTasks));
     }
     if (tab === "unscheduled") {
       const unscheduledTasks = effectiveTasks.filter(filter).filter(
         (task) => task.effectiveStatus === "todo" && !task.effectiveScheduled,
       );
-      return countTopLevel(unscheduledTasks);
+      return countTopLevel(recomputeTopLevelInQuery(unscheduledTasks));
     }
-    return countTopLevel(effectiveTasks.filter(filter));
+    return countTopLevel(recomputeTopLevelInQuery(effectiveTasks.filter(filter)));
   }
 
   private openSavedViewMenu(event: MouseEvent, view: QueryPreset): void {
@@ -2434,15 +2436,19 @@ export class TaskCenterView extends ItemView {
       const dayTasks = effectiveTasks
         .filter((t) => t.effectiveScheduled === day)
         .filter(filter);
-      dayTasks.sort((a, b) => {
+      // Recompute top-level after query filtering: children whose parent
+      // was filtered out must appear as top-level cards rather than
+      // being hidden behind a parent that isn't in the result.
+      const dayTasksRecomputed = recomputeTopLevelInQuery(dayTasks);
+      dayTasksRecomputed.sort((a, b) => {
         if (a.effectiveDeadline && b.effectiveDeadline) return a.effectiveDeadline.localeCompare(b.effectiveDeadline);
         if (a.effectiveDeadline) return -1;
         if (b.effectiveDeadline) return 1;
         return 0;
       });
-      const topLevel = dayTasks.filter((t) => t.isTopLevelInQuery);
+      const topLevel = dayTasksRecomputed.filter((t) => t.isTopLevelInQuery);
       const stats = col.createSpan({
-        text: this.columnStats(dayTasks),
+        text: this.columnStats(dayTasksRecomputed),
         cls: "bt-week-stats",
       });
       stats.title = "Scheduled estimate (hours)";
@@ -2590,7 +2596,10 @@ export class TaskCenterView extends ItemView {
       const dayTasksAll = effectiveTasks
         .filter((t) => t.effectiveScheduled === day)
         .filter(filter);
-      const dayTasks = dayTasksAll.filter((t) => t.isTopLevelInQuery);
+      // Recompute top-level after query filtering so children whose
+      // parent was filtered out become top-level cards in the cell.
+      const dayTasksRecomputed = recomputeTopLevelInQuery(dayTasksAll);
+      const dayTasks = dayTasksRecomputed.filter((t) => t.isTopLevelInQuery);
       const head = cell.createDiv({ cls: "bt-month-cell-head" });
       head.createSpan({ text: `${dObj.getDate()}`, cls: "bt-month-cell-date" });
       if (dayTasks.length > 0) {
@@ -2640,7 +2649,7 @@ export class TaskCenterView extends ItemView {
    * into a single thumb-reachable surface. Buttons call the same `api.*`
    * methods as the desktop UI; rendered as a flat list of large tap targets.
    */
-  private openCardActionSheet(t: ParsedTask): void {
+  private openCardActionSheet(t: EffectiveTask): void {
     const today = todayISO();
     const tomorrow = addDays(today, 1);
     let sheet: BottomSheet | null = null;
@@ -2681,8 +2690,8 @@ export class TaskCenterView extends ItemView {
         // ⏳ <date> entries keep the date verbatim — the i18n template
         // wraps it without reformatting (locale-stable per US-411).
         btn(
-          t.status === "done" ? tr("sheet.markUndone") : tr("sheet.done"),
-          () => (t.status === "done" ? this.api.undone(t.id) : this.api.done(t.id)),
+          t.effectiveStatus === "done" ? tr("sheet.markUndone") : tr("sheet.done"),
+          () => (t.effectiveStatus === "done" ? this.api.undone(t.id) : this.api.done(t.id)),
         );
         btn(tr("sheet.scheduleAt", { date: today }), () => this.api.schedule(t.id, today));
         btn(tr("sheet.scheduleAt", { date: tomorrow }), () => this.api.schedule(t.id, tomorrow));
@@ -2737,9 +2746,11 @@ export class TaskCenterView extends ItemView {
     const filter = this.getTextFilter();
     const effectiveTasks = this.getEffectiveTasks();
     const completedAll = effectiveTasks.filter((t) => t.effectiveStatus === "done" && t.completed);
-    const completed = completedAll
+    const completedFiltered = completedAll
       .filter(filter)
       .sort((a, b) => (b.completed! < a.completed! ? -1 : 1));
+    // Recompute top-level after query filtering.
+    const completed = recomputeTopLevelInQuery(completedFiltered);
 
     const wrap = parent.createDiv({ cls: "bt-completed" });
     wrap.dataset.view = "list";
@@ -2880,8 +2891,9 @@ export class TaskCenterView extends ItemView {
     const unscheduledAll = unscheduledBase.filter(filter);
     // Sort for triage: deadline ascending first (nearest deadline is urgent),
     // tasks without deadline fall to the end; tie-break by created date desc
-    // (newer tasks first). Children-of-visible-parents dedup happens after.
-    unscheduledAll.sort((a, b) => {
+    // (newer tasks first). Recompute top-level after query filtering.
+    const unscheduledRecomputed = recomputeTopLevelInQuery(unscheduledAll);
+    unscheduledRecomputed.sort((a, b) => {
       if (a.effectiveDeadline && b.effectiveDeadline) return a.effectiveDeadline.localeCompare(b.effectiveDeadline);
       if (a.effectiveDeadline) return -1;
       if (b.effectiveDeadline) return 1;
@@ -2890,7 +2902,7 @@ export class TaskCenterView extends ItemView {
       if (b.effectiveCreated) return 1;
       return 0;
     });
-    const unscheduled = unscheduledAll.filter((t) => t.isTopLevelInQuery);
+    const unscheduled = unscheduledRecomputed.filter((t) => t.isTopLevelInQuery);
     if (unscheduled.length === 0 && !this.state.showUnscheduledPool) return;
 
     const wrap = parent.createDiv({ cls: "bt-pool-wrap" });
@@ -3013,26 +3025,32 @@ export class TaskCenterView extends ItemView {
 
     const today = todayISO();
     const tomorrow = addDays(today, 1);
+    const filter = this.getTextFilter();
     const effectiveTasks = this.getEffectiveTasks();
-    const activeTodos = effectiveTasks.filter(
+
+    // Apply text filter first, then recompute top-level so children
+    // whose parent was filtered out still appear as top-level cards.
+    let activeTodos = effectiveTasks.filter(
       (t) => t.effectiveStatus === "todo" && t.title.trim() !== "",
     );
+    activeTodos = recomputeTopLevelInQuery(activeTodos.filter(filter));
 
     // Overdue: anything with an effective deadline in the past,
     // regardless of schedule. Sort earliest-deadline first.
+    // Only top-level cards (children under visible parents are nested).
     const overdue = activeTodos
-      .filter((t) => t.effectiveDeadline && t.effectiveDeadline < today)
+      .filter((t) => t.isTopLevelInQuery && t.effectiveDeadline && t.effectiveDeadline < today)
       .sort((a, b) => (a.effectiveDeadline ?? "").localeCompare(b.effectiveDeadline ?? ""));
 
     // Today: effectiveScheduled lands on today. Skip cards already in overdue.
     const overdueIds = new Set(overdue.map((t) => t.id));
     const todayList = activeTodos
-      .filter((t) => t.effectiveScheduled === today && !overdueIds.has(t.id));
+      .filter((t) => t.isTopLevelInQuery && t.effectiveScheduled === today && !overdueIds.has(t.id));
 
-    // Unscheduled recommendation: one freshest todo with no effective
-    // scheduled or deadline.
+    // Unscheduled recommendation: one freshest top-level todo with no
+    // effective scheduled or deadline.
     const unscheduledRec = activeTodos
-      .filter((t) => !t.effectiveScheduled && !t.effectiveDeadline)
+      .filter((t) => t.isTopLevelInQuery && !t.effectiveScheduled && !t.effectiveDeadline)
       .sort((a, b) => (b.effectiveCreated ?? "").localeCompare(a.effectiveCreated ?? ""))
       .slice(0, 1);
 
@@ -3238,7 +3256,46 @@ export class TaskCenterView extends ItemView {
     const active = this.activeSavedView();
     const filter = this.getTextFilter();
     const effectiveTasks = this.getEffectiveTasks();
-    const list = effectiveTasks.filter(filter).filter((t) => t.isTopLevelInQuery);
+
+    // Apply text filter, then recompute top-level so children whose
+    // parent was filtered out appear as top-level cards.
+    const filtered = recomputeTopLevelInQuery(effectiveTasks.filter(filter));
+
+    // Use QueryPreset view projection for list sections when configured.
+    const viewConfig = active.view ?? { type: "list" as const };
+    const viewModel = applyViewProjection(
+      filtered,
+      viewConfig,
+      this.plugin.settings.weekStartsOn,
+      this.state.anchorISO,
+    );
+
+    if (viewModel.type === "list" && viewModel.sections.length > 0) {
+      // Render each section with its own header and tasks.
+      let totalVisible = 0;
+      for (const section of viewModel.sections) {
+        const sectionTasks = section.tasks.filter((t) => t.isTopLevelInQuery);
+        totalVisible += sectionTasks.length;
+        const sectionWrap = parent.createDiv({ cls: "bt-list-section" });
+        const sectionHead = sectionWrap.createDiv({ cls: "bt-list-section-head" });
+        sectionHead.createSpan({
+          text: `${section.title} (${sectionTasks.length})`,
+          cls: "bt-list-section-title",
+        });
+        const sectionBody = sectionWrap.createDiv({ cls: "bt-list-section-body" });
+        for (const task of sectionTasks) {
+          this.renderCard(sectionBody, task);
+        }
+      }
+      if (totalVisible === 0) {
+        if (this.tasks.length > 0) this.renderFilterEmptyState(parent);
+        else parent.createDiv({ text: tr("filters.empty"), cls: "bt-empty" });
+      }
+      return;
+    }
+
+    // Fallback: flat list (no configured sections, or non-list view type).
+    const list = filtered.filter((t) => t.isTopLevelInQuery);
     this.sortListTasks(list, active.view?.orderBy);
     if (list.length === 0) {
       if (this.tasks.length > 0) this.renderFilterEmptyState(parent);
@@ -3295,7 +3352,9 @@ export class TaskCenterView extends ItemView {
       (t) => !t.effectiveScheduled && t.effectiveStatus === "todo",
     );
     const unscheduledAll = unscheduledBase.filter(filter);
-    unscheduledAll.sort((a, b) => {
+    // Recompute top-level after query filtering.
+    const unscheduledRecomputed = recomputeTopLevelInQuery(unscheduledAll);
+    unscheduledRecomputed.sort((a, b) => {
       if (a.effectiveDeadline && b.effectiveDeadline) return a.effectiveDeadline.localeCompare(b.effectiveDeadline);
       if (a.effectiveDeadline) return -1;
       if (b.effectiveDeadline) return 1;
@@ -3304,7 +3363,7 @@ export class TaskCenterView extends ItemView {
       if (b.effectiveCreated) return 1;
       return 0;
     });
-    const unscheduled = unscheduledAll.filter((t) => t.isTopLevelInQuery);
+    const unscheduled = unscheduledRecomputed.filter((t) => t.isTopLevelInQuery);
 
     const wrap = parent.createDiv({ cls: "bt-unscheduled-big" });
     wrap.dataset.view = "list";
@@ -3662,7 +3721,7 @@ export class TaskCenterView extends ItemView {
 
   private wireCardEvents(
     el: HTMLElement,
-    t: ParsedTask,
+    t: EffectiveTask,
     opts: { acceptNestDrop?: boolean } = {},
   ) {
     const acceptNestDrop = opts.acceptNestDrop ?? true;
@@ -3824,7 +3883,15 @@ export class TaskCenterView extends ItemView {
     });
   }
 
-  private getTextFilter(): (t: ParsedTask) => boolean {
+  /**
+   * Build a filter predicate from the text filter controls.
+   *
+   * Uses effectiveStatus (post terminal-inheritance) and effective dates
+   * instead of raw ParsedTask status/time fields, so that children under
+   * done/dropped parents are correctly excluded even when their raw
+   * checkbox is unchecked.
+   */
+  private getTextFilter(): (t: EffectiveTask) => boolean {
     const q = this.state.filter.trim().toLowerCase();
     const tags = parseFilterTags(this.state.savedViewTag);
     const time = this.state.savedViewTime;
@@ -3836,12 +3903,12 @@ export class TaskCenterView extends ItemView {
         if (!taskHasTag(t, tag)) return false;
       }
       if (!this.taskMatchesTimeFilters(t, time)) return false;
-      if (status !== "all" && !status.includes(t.status)) return false;
+      if (status !== "all" && !status.includes(t.effectiveStatus)) return false;
       return true;
     };
   }
 
-  private getSavedViewFilter(view: QueryPreset): (t: ParsedTask) => boolean {
+  private getSavedViewFilter(view: QueryPreset): (t: EffectiveTask) => boolean {
     const normalized = normalizeQueryPreset(view);
     const q = (normalized.filters.search ?? "").trim().toLowerCase();
     const tags = parseFilterTags(queryPresetTagString(normalized));
@@ -3854,7 +3921,7 @@ export class TaskCenterView extends ItemView {
         if (!taskHasTag(t, tag)) return false;
       }
       if (!this.taskMatchesTimeFilters(t, time)) return false;
-      if (status !== "all" && !status.includes(t.status)) return false;
+      if (status !== "all" && !status.includes(t.effectiveStatus)) return false;
       return true;
     };
   }
@@ -3863,7 +3930,7 @@ export class TaskCenterView extends ItemView {
     return Object.values(time).some((value) => !!value?.trim());
   }
 
-  private taskMatchesTimeFilters(task: ParsedTask, time: SavedViewTimeFilters): boolean {
+  private taskMatchesTimeFilters(task: EffectiveTask, time: SavedViewTimeFilters): boolean {
     for (const field of ["scheduled", "deadline", "completed", "created"] as SavedViewTimeField[]) {
       const token = time[field]?.trim();
       if (token && !taskMatchesTimeFilter(task, field, token, this.plugin.settings.weekStartsOn)) return false;
@@ -3889,10 +3956,10 @@ export class TaskCenterView extends ItemView {
     const q = this.state.filter.trim().toLowerCase();
     const time = this.state.savedViewTime;
     const status = normalizeSavedViewStatus(this.state.savedViewStatus);
-    for (const task of this.tasks) {
+    for (const task of this.getEffectiveTasks()) {
       if (q && !taskMatchesText(task, q)) continue;
       if (!this.taskMatchesTimeFilters(task, time)) continue;
-      if (status !== "all" && !status.includes(task.status)) continue;
+      if (status !== "all" && !status.includes(task.effectiveStatus)) continue;
       for (const tag of task.tags) add(tag, 1);
     }
     for (const view of this.plugin.settings.queryPresets.map((item) => normalizeQueryPreset(item))) {
@@ -4192,10 +4259,11 @@ export class TaskCenterView extends ItemView {
   private renderFooter(parent: HTMLElement) {
     const foot = parent.createDiv({ cls: "bt-footer" });
     const info = foot.createDiv({ cls: "bt-footer-info" });
-    const total = this.tasks.filter((t) => t.status === "todo" && !t.inheritsTerminal).length;
-    const done = this.tasks.filter((t) => t.status === "done").length;
-    const overdue = this.tasks.filter(
-      (t) => t.status === "todo" && !t.inheritsTerminal && t.deadline && t.deadline < todayISO(),
+    const effectiveTasks = this.getEffectiveTasks();
+    const total = effectiveTasks.filter((t) => t.effectiveStatus === "todo" && t.isTopLevelInQuery).length;
+    const done = effectiveTasks.filter((t) => t.effectiveStatus === "done" && t.isTopLevelInQuery).length;
+    const overdue = effectiveTasks.filter(
+      (t) => t.effectiveStatus === "todo" && t.isTopLevelInQuery && t.effectiveDeadline && t.effectiveDeadline < todayISO(),
     ).length;
     info.setText(tr("footer.status", { todo: total, done, overdue }));
 
@@ -4294,12 +4362,12 @@ export class TaskCenterView extends ItemView {
   // Source/context editing is now the US-168 single-click source shell.
   // Wired from `wireCardEvents`'s `contextmenu` listener.
   // see USER_STORIES.md
-  openContextMenu(e: MouseEvent, task: ParsedTask) {
+  openContextMenu(e: MouseEvent, task: EffectiveTask) {
     const m = new Menu();
     m.addItem((i) =>
-      i.setTitle(task.status === "done" ? tr("ctx.markTodo") : tr("ctx.markDone")).onClick(async () => {
+      i.setTitle(task.effectiveStatus === "done" ? tr("ctx.markTodo") : tr("ctx.markDone")).onClick(async () => {
         await this.runWithRemoveAnim(task.id, async () => {
-          if (task.status === "done") await this.api.undone(task.id);
+          if (task.effectiveStatus === "done") await this.api.undone(task.id);
           else await this.api.done(task.id);
         });
       }),

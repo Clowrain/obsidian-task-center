@@ -10,9 +10,10 @@
 // no await. The cache may not be fully primed (no one opened the board yet)
 // and that's fine: the count grows as files get indexed (ARCHITECTURE.md §3.3).
 
-import { ParsedTask } from "./types";
 import { TaskCache } from "./cache";
 import { todayISO } from "./dates";
+import { deriveEffectiveTasks } from "./task-tree";
+import type { EffectiveTask } from "./task-tree";
 import { t as tr } from "./i18n";
 
 const REFRESH_DEBOUNCE_MS = 500;
@@ -44,13 +45,17 @@ export class StatusBar {
   refresh(): void {
     const all = this.cache.flatten();
     const today = todayISO();
+    // Derive effective tasks so counts reflect terminal-inherited status:
+    // children under done/dropped parents are correctly excluded from
+    // "todo" counts, and inherited scheduled/deadline dates participate.
+    const effective = deriveEffectiveTasks(all);
     // §7.3: single-pass to avoid 3 intermediate array allocations
     let todayCount = 0;
     let overdue = 0;
-    for (const t of all) {
-      if (t.status !== "todo" || t.inheritsTerminal || t.title.trim() === "") continue;
-      if (t.scheduled === today) todayCount++;
-      if (t.deadline && t.deadline < today) overdue++;
+    for (const t of effective) {
+      if (!activeTodo(t)) continue;
+      if (t.effectiveScheduled === today) todayCount++;
+      if (t.effectiveDeadline && t.effectiveDeadline < today) overdue++;
     }
     // task #43: route status text + tooltip through tr() so a Chinese
     // Obsidian session shows Chinese strings instead of the EN literals.
@@ -92,10 +97,11 @@ export class StatusBar {
 // task #41: mirror the board's US-107 filter so a `- [ ] ⏳ today` line
 // (a blank-title task) is dropped from today/overdue counts. Without this
 // the status bar's number disagreed with the visible card count.
-function activeTodo(t: ParsedTask): boolean {
+// Uses effectiveStatus (post terminal-inheritance) instead of raw status
+// so children under done/dropped parents are excluded from active counts.
+function activeTodo(t: EffectiveTask): boolean {
   return (
-    t.status === "todo" &&
-    !t.inheritsTerminal &&
+    t.effectiveStatus === "todo" &&
     t.title.trim() !== ""
   );
 }

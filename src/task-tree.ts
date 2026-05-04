@@ -301,3 +301,37 @@ export function deriveEffectiveTasks(tasks: ParsedTask[]): EffectiveTask[] {
 export function countTopLevel(tasks: EffectiveTask[]): number {
   return tasks.filter((t) => t.isTopLevelInQuery).length;
 }
+
+/**
+ * Recompute isTopLevelInQuery after query filtering.
+ *
+ * `deriveEffectiveTasks` computes isTopLevelInQuery from the full vault
+ * task set. After applying query filters, some parent tasks may be
+ * removed. Children whose parent was filtered out must become top-level
+ * so they remain visible (their parent is not in the filtered result).
+ *
+ * Conversely, children whose parent IS still in the filtered result
+ * must remain nested (isTopLevelInQuery=false).
+ *
+ * This is a pure function — it returns a new array without mutating inputs.
+ */
+export function recomputeTopLevelInQuery(
+  filtered: EffectiveTask[],
+): EffectiveTask[] {
+  const filteredIds = new Set(filtered.map((t) => t.id));
+
+  return filtered.map((t) => {
+    // Already top-level → keep as-is.
+    if (t.isTopLevelInQuery) return t;
+
+    // Child whose renderParentId is NOT in the filtered set:
+    // the parent was removed by the query filter, so this child
+    // must appear as a top-level card.
+    if (t.renderParentId === null || !filteredIds.has(t.renderParentId)) {
+      return { ...t, isTopLevelInQuery: true, renderParentId: null };
+    }
+
+    // Child whose parent IS still visible → stays nested.
+    return t;
+  });
+}
