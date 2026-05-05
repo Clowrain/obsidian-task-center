@@ -1236,6 +1236,27 @@ export function moveQueryPresetById(
   return out;
 }
 
+/**
+ * 将指定 id 的 QueryPreset 移动到目标索引位置。
+ * 拖动排序时需要将 tab 移到任意目标位置，而非仅 ±1 步。
+ */
+export function reorderQueryPresetById(
+  presets: readonly QueryPreset[],
+  id: string,
+  targetIndex: number,
+): QueryPreset[] {
+  const index = presets.findIndex((p) => p.id === id);
+  if (index === -1) return [...presets];
+  if (index === targetIndex) return [...presets];
+  const out = [...presets];
+  const [item] = out.splice(index, 1);
+  // targetIndex is the desired position in the original array;
+  // after splice, indices shift so we clamp to valid range.
+  const insertAt = Math.max(0, Math.min(targetIndex, out.length));
+  out.splice(insertAt, 0, item);
+  return out;
+}
+
 export function sameQueryPresetContent(a: QueryPreset, b: QueryPreset): boolean {
   const left = normalizeQueryPreset(a);
   const right = normalizeQueryPreset(b);

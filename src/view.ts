@@ -60,6 +60,7 @@ import {
   hasQueryPresetFilters,
   duplicateQueryPreset,
   moveQueryPresetById,
+  reorderQueryPresetById,
   renameQueryPresetById,
   setQueryPresetHiddenById,
   deleteQueryPresetById,
@@ -679,6 +680,7 @@ export class TaskCenterView extends ItemView {
     if (dirty) btn.dataset.queryTabDirty = "true";
     if (this.plugin.settings.defaultSavedViewId === view.id) btn.dataset.queryTabDefault = "true";
     btn.title = badges.length > 0 ? `${view.name} · ${badges.join(" · ")}` : view.name;
+    btn.draggable = true;
     const label = btn.createDiv({ cls: "bt-tab-label" });
     label.createSpan({ text: view.name, cls: "bt-tab-name" });
     if (dirty) {
@@ -702,17 +704,81 @@ export class TaskCenterView extends ItemView {
       this.openSavedViewMenu(event, view);
     });
 
+    // ── Tab drag-to-reorder ──
+    btn.addEventListener("dragstart", (e) => {
+      if (!e.dataTransfer) return;
+      e.dataTransfer.effectAllowed = "move";
+      e.dataTransfer.setData("text/tab-id", view.id);
+      btn.addClass("bt-tab-dragging");
+      // Let the bar know a tab drag is in progress
+      bar.addClass("bt-tabbar-dragging");
+    });
+    btn.addEventListener("dragend", () => {
+      btn.removeClass("bt-tab-dragging");
+      bar.removeClass("bt-tabbar-dragging");
+      // Clear all insertion indicators
+      bar.findAll(".bt-tab").forEach((el) => {
+        el.removeClass("bt-tab-drop-before", "bt-tab-drop-after");
+      });
+    });
     btn.addEventListener("dragover", (e) => {
       const dt = e.dataTransfer;
-      if (!dt || !dt.types.includes("text/task-id")) return;
-      e.preventDefault();
-      dt.dropEffect = "move";
-      btn.addClass("drag-hover");
-      this.dwellTracker.update(view.id, btn, this.state.savedViewId ?? "");
+      if (!dt) return;
+
+      // Cross-tab drag dwell for task cards
+      if (dt.types.includes("text/task-id")) {
+        e.preventDefault();
+        dt.dropEffect = "move";
+        btn.addClass("drag-hover");
+        this.dwellTracker.update(view.id, btn, this.state.savedViewId ?? "");
+        return;
+      }
+
+      // Tab reorder
+      if (dt.types.includes("text/tab-id")) {
+        const draggedId = dt.getData("text/tab-id");
+        if (draggedId === view.id) return; // can't drop on itself
+        e.preventDefault();
+        dt.dropEffect = "move";
+        // Show insertion indicator based on cursor position
+        const rect = btn.getBoundingClientRect();
+        const mid = rect.left + rect.width / 2;
+        const isAfter = e.clientX > mid;
+        // Clear all indicators first
+        bar.findAll(".bt-tab").forEach((el) => {
+          el.removeClass("bt-tab-drop-before", "bt-tab-drop-after");
+        });
+        btn.addClass(isAfter ? "bt-tab-drop-after" : "bt-tab-drop-before");
+      }
     });
-    btn.addEventListener("dragleave", () => {
-      btn.removeClass("drag-hover");
-      this.dwellTracker.reset();
+    btn.addEventListener("dragleave", (e) => {
+      const dt = e.dataTransfer;
+      if (dt?.types.includes("text/task-id")) {
+        btn.removeClass("drag-hover");
+        this.dwellTracker.reset();
+      }
+      if (dt?.types.includes("text/tab-id")) {
+        btn.removeClass("bt-tab-drop-before", "bt-tab-drop-after");
+      }
+    });
+    btn.addEventListener("drop", (e) => {
+      const dt = e.dataTransfer;
+      if (!dt) return;
+      if (dt.types.includes("text/tab-id")) {
+        e.preventDefault();
+        e.stopPropagation();
+        const draggedId = dt.getData("text/tab-id");
+        if (draggedId === view.id) return;
+        const rect = btn.getBoundingClientRect();
+        const mid = rect.left + rect.width / 2;
+        const isAfter = e.clientX > mid;
+        const presets = this.plugin.settings.queryPresets;
+        const targetIndex = presets.findIndex((p) => p.id === view.id);
+        if (targetIndex === -1) return;
+        // If dropping after, insert at targetIndex + 1; if before, at targetIndex
+        const insertAt = isAfter ? targetIndex + 1 : targetIndex;
+        void this.reorderQueryTab(draggedId, insertAt);
+      }
     });
   }
 
@@ -737,8 +803,10 @@ export class TaskCenterView extends ItemView {
     overflowTabs: QueryPreset[],
     closeSheet: () => void,
   ): void {
+    const container = parent;
     for (const view of overflowTabs) {
       const row = parent.createDiv({ cls: "bt-overflow-tab-row" });
+      row.draggable = true;
       // First-class data attributes: same as visible tab buttons
       row.dataset.tabId = view.id;
       row.dataset.queryTabId = view.id;
@@ -746,6 +814,57 @@ export class TaskCenterView extends ItemView {
       if (dirty) row.dataset.queryTabDirty = "true";
       if (this.plugin.settings.defaultSavedViewId === view.id) row.dataset.queryTabDefault = "true";
       if (view.id === this.state.savedViewId) row.addClass("bt-overflow-tab-row-active");
+
+      // ── Drag-to-reorder for overflow tab rows ──
+      row.addEventListener("dragstart", (e) => {
+        if (!e.dataTransfer) return;
+        e.dataTransfer.effectAllowed = "move";
+        e.dataTransfer.setData("text/tab-id", view.id);
+        row.addClass("bt-overflow-tab-row-dragging");
+      });
+      row.addEventListener("dragend", () => {
+        row.removeClass("bt-overflow-tab-row-dragging");
+        container.findAll(".bt-overflow-tab-row").forEach((el) => {
+          el.removeClass("bt-overflow-tab-row-drop-before", "bt-overflow-tab-row-drop-after");
+        });
+      });
+      row.addEventListener("dragover", (e) => {
+        const dt = e.dataTransfer;
+        if (!dt?.types.includes("text/tab-id")) return;
+        const draggedId = dt.getData("text/tab-id");
+        if (draggedId === view.id) return;
+        e.preventDefault();
+        dt.dropEffect = "move";
+        const rect = row.getBoundingClientRect();
+        const mid = rect.top + rect.height / 2;
+        const isAfter = e.clientY > mid;
+        container.findAll(".bt-overflow-tab-row").forEach((el) => {
+          el.removeClass("bt-overflow-tab-row-drop-before", "bt-overflow-tab-row-drop-after");
+        });
+        row.addClass(isAfter ? "bt-overflow-tab-row-drop-after" : "bt-overflow-tab-row-drop-before");
+      });
+      row.addEventListener("dragleave", (e) => {
+        const dt = e.dataTransfer;
+        if (dt?.types.includes("text/tab-id")) {
+          row.removeClass("bt-overflow-tab-row-drop-before", "bt-overflow-tab-row-drop-after");
+        }
+      });
+      row.addEventListener("drop", (e) => {
+        const dt = e.dataTransfer;
+        if (!dt?.types.includes("text/tab-id")) return;
+        e.preventDefault();
+        e.stopPropagation();
+        const draggedId = dt.getData("text/tab-id");
+        if (draggedId === view.id) return;
+        const rect = row.getBoundingClientRect();
+        const mid = rect.top + rect.height / 2;
+        const isAfter = e.clientY > mid;
+        const presets = this.plugin.settings.queryPresets;
+        const targetIndex = presets.findIndex((p) => p.id === view.id);
+        if (targetIndex === -1) return;
+        const insertAt = isAfter ? targetIndex + 1 : targetIndex;
+        void this.reorderQueryTab(draggedId, insertAt).then(() => closeSheet());
+      });
 
       // Main row: name, dirty dot, count
       const main = row.createDiv({ cls: "bt-overflow-tab-main" });
@@ -798,8 +917,6 @@ export class TaskCenterView extends ItemView {
       makeAction(tr("savedViews.rename"), () => this.renameSavedView(view));
       makeAction(tr("savedViews.copy"), () => this.copySavedView(view));
       makeAction(tr("savedViews.setDefault"), () => this.setDefaultSavedView(view.id));
-      makeAction(tr("savedViews.moveLeft"), () => this.moveSavedView(view, -1));
-      makeAction(tr("savedViews.moveRight"), () => this.moveSavedView(view, 1));
       makeAction(view.hidden ? tr("savedViews.show") : tr("savedViews.hide"), () =>
         this.toggleSavedViewHidden(view, !view.hidden),
       );
@@ -1246,16 +1363,6 @@ export class TaskCenterView extends ItemView {
       }),
     );
     menu.addItem((item) =>
-      item.setTitle(tr("savedViews.moveLeft")).onClick(() => {
-        void this.moveSavedView(normalized, -1);
-      }),
-    );
-    menu.addItem((item) =>
-      item.setTitle(tr("savedViews.moveRight")).onClick(() => {
-        void this.moveSavedView(normalized, 1);
-      }),
-    );
-    menu.addItem((item) =>
       item.setTitle(normalized.hidden ? tr("savedViews.show") : tr("savedViews.hide")).onClick(() => {
         void this.toggleSavedViewHidden(normalized, !normalized.hidden);
       }),
@@ -1316,9 +1423,62 @@ export class TaskCenterView extends ItemView {
     const rows = parent.createDiv({ cls: "bt-manage-tabs-list" });
     for (const view of this.plugin.settings.queryPresets.map((item) => normalizeQueryPreset(item))) {
       const row = rows.createDiv({ cls: "bt-manage-tab-row" });
+      row.draggable = true;
       const main = row.createDiv({ cls: "bt-manage-tab-main" });
       const title = main.createDiv({ cls: "bt-manage-tab-title", text: view.name });
       title.dataset.queryTabId = view.id;
+
+      // ── Drag-to-reorder for manage tab rows ──
+      row.addEventListener("dragstart", (e) => {
+        if (!e.dataTransfer) return;
+        e.dataTransfer.effectAllowed = "move";
+        e.dataTransfer.setData("text/tab-id", view.id);
+        row.addClass("bt-manage-tab-row-dragging");
+      });
+      row.addEventListener("dragend", () => {
+        row.removeClass("bt-manage-tab-row-dragging");
+        rows.findAll(".bt-manage-tab-row").forEach((el) => {
+          el.removeClass("bt-manage-tab-row-drop-before", "bt-manage-tab-row-drop-after");
+        });
+      });
+      row.addEventListener("dragover", (e) => {
+        const dt = e.dataTransfer;
+        if (!dt?.types.includes("text/tab-id")) return;
+        const draggedId = dt.getData("text/tab-id");
+        if (draggedId === view.id) return;
+        e.preventDefault();
+        dt.dropEffect = "move";
+        const rect = row.getBoundingClientRect();
+        const mid = rect.top + rect.height / 2;
+        const isAfter = e.clientY > mid;
+        rows.findAll(".bt-manage-tab-row").forEach((el) => {
+          el.removeClass("bt-manage-tab-row-drop-before", "bt-manage-tab-row-drop-after");
+        });
+        row.addClass(isAfter ? "bt-manage-tab-row-drop-after" : "bt-manage-tab-row-drop-before");
+      });
+      row.addEventListener("dragleave", (e) => {
+        const dt = e.dataTransfer;
+        if (dt?.types.includes("text/tab-id")) {
+          row.removeClass("bt-manage-tab-row-drop-before", "bt-manage-tab-row-drop-after");
+        }
+      });
+      row.addEventListener("drop", (e) => {
+        const dt = e.dataTransfer;
+        if (!dt?.types.includes("text/tab-id")) return;
+        e.preventDefault();
+        e.stopPropagation();
+        const draggedId = dt.getData("text/tab-id");
+        if (draggedId === view.id) return;
+        const rect = row.getBoundingClientRect();
+        const mid = rect.top + rect.height / 2;
+        const isAfter = e.clientY > mid;
+        const presets = this.plugin.settings.queryPresets;
+        const targetIndex = presets.findIndex((p) => p.id === view.id);
+        if (targetIndex === -1) return;
+        const insertAt = isAfter ? targetIndex + 1 : targetIndex;
+        void this.reorderQueryTab(draggedId, insertAt).then(rerender);
+      });
+
       const meta = main.createDiv({ cls: "bt-manage-tab-meta" });
       for (const badge of this.savedViewBadges(view)) {
         if (view.hidden && badge === tr("savedViews.currentBadge")) continue;
@@ -1341,8 +1501,6 @@ export class TaskCenterView extends ItemView {
       action(tr("savedViews.rename"), () => this.renameSavedView(view));
       action(tr("savedViews.copy"), () => this.copySavedView(view));
       action(tr("savedViews.setDefault"), () => this.setDefaultSavedView(view.id));
-      action(tr("savedViews.moveLeft"), () => this.moveSavedView(view, -1));
-      action(tr("savedViews.moveRight"), () => this.moveSavedView(view, 1));
       action(view.hidden ? tr("savedViews.show") : tr("savedViews.hide"), () => this.toggleSavedViewHidden(view, !view.hidden));
       if (view.builtin) action(tr("savedViews.restore"), () => this.restoreBuiltinSavedView(view));
       if (!view.builtin) {
@@ -1383,6 +1541,12 @@ export class TaskCenterView extends ItemView {
 
   private async moveSavedView(view: QueryPreset, direction: -1 | 1): Promise<void> {
     this.plugin.settings.queryPresets = moveQueryPresetById(this.plugin.settings.queryPresets, view.id, direction);
+    await this.plugin.saveSettings();
+    this.render();
+  }
+
+  private async reorderQueryTab(id: string, targetIndex: number): Promise<void> {
+    this.plugin.settings.queryPresets = reorderQueryPresetById(this.plugin.settings.queryPresets, id, targetIndex);
     await this.plugin.saveSettings();
     this.render();
   }

@@ -76,6 +76,22 @@
   outline-offset: -1px;
   position: relative;
 }
+/* Tab drag-to-reorder: dragged tab becomes semi-transparent */
+.task-center-view .bt-tab.bt-tab-dragging {
+  opacity: 0.4;
+}
+/* Insertion indicator: drop before this tab (left edge) */
+.task-center-view .bt-tab.bt-tab-drop-before {
+  border-left: 2px solid var(--interactive-accent);
+}
+/* Insertion indicator: drop after this tab (right edge) */
+.task-center-view .bt-tab.bt-tab-drop-after {
+  border-right: 2px solid var(--interactive-accent);
+}
+/* Tab bar drag active: all tabs get a subtle cursor hint */
+.task-center-view .bt-tabbar.bt-tabbar-dragging .bt-tab:not(.bt-tab-dragging) {
+  cursor: copy;
+}
 /* Cross-tab drag dwell progress bar (UX.md §6.1). The TabDwellTracker
    writes `--tc-dwell-progress` as a 0..1 value on the hovered tab; this
    pseudo-element renders it as a horizontal bar. */
@@ -2251,6 +2267,17 @@
   color: var(--text-normal);
 }
 
+/* Manage tab rows drag-to-reorder */
+.task-center-bottom-sheet .bt-manage-tab-row.bt-manage-tab-row-dragging {
+  opacity: 0.4;
+}
+.task-center-bottom-sheet .bt-manage-tab-row.bt-manage-tab-row-drop-before {
+  border-top: 2px solid var(--interactive-accent);
+}
+.task-center-bottom-sheet .bt-manage-tab-row.bt-manage-tab-row-drop-after {
+  border-bottom: 2px solid var(--interactive-accent);
+}
+
 /* ── Overflow tabs sheet (VAL-GUI-005) ── */
 .task-center-bottom-sheet .bt-overflow-tabs-sheet {
   display: flex;
@@ -2330,6 +2357,17 @@
   background: var(--background-secondary);
   color: var(--text-muted);
   font-size: 11px;
+}
+
+/* Overflow tab rows drag-to-reorder */
+.task-center-bottom-sheet .bt-overflow-tab-row.bt-overflow-tab-row-dragging {
+  opacity: 0.4;
+}
+.task-center-bottom-sheet .bt-overflow-tab-row.bt-overflow-tab-row-drop-before {
+  border-top: 2px solid var(--interactive-accent);
+}
+.task-center-bottom-sheet .bt-overflow-tab-row.bt-overflow-tab-row-drop-after {
+  border-bottom: 2px solid var(--interactive-accent);
 }
 
 /* ============================================================================
