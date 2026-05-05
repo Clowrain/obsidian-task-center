@@ -28,7 +28,7 @@ import { TabDwellTracker } from "./view/dnd";
 import { UndoStack, UndoEntry, UndoOp } from "./view/undo";
 import { BottomSheet } from "./view/bottom-sheet";
 import { attachCardGestures } from "./view/touch";
-import { shouldCloseFilterPopoverOnPointerDown } from "./view/filter-popover";
+import { shouldCloseFilterPopoverOnPointerDown, isClickInsideFilterControls } from "./view/filter-popover";
 import { isMobileMode } from "./platform";
 import { openTaskSourceEditShell } from "./view/source-dialog";
 import { weekMinHeightFromViewHeightPx } from "./view/layout";
@@ -257,7 +257,9 @@ export class TaskCenterView extends ItemView {
     // Keyboard
     this.contentEl.tabIndex = 0;
     this.registerDomEvent(this.contentEl, "keydown", (e) => this.handleKey(e));
-    this.registerDomEvent(this.contentEl.ownerDocument, "pointerdown", (e) => this.handleFilterOutsidePointerDown(e));
+    // 使用 capture 阶段确保在 Obsidian 可能阻止冒泡前捕获 pointerdown。
+    // 使用 activeDocument 而非 document，保证 popout 窗口兼容。
+    this.registerDomEvent(activeDocument, "pointerdown", (e) => this.handleFilterOutsidePointerDown(e), { capture: true });
 
     // US-502: mobile layout gating. Reads viewport width (< 600px) OR
     // user setting `mobileForceLayout` (escape hatch for iPad / split-
@@ -4419,12 +4421,10 @@ export class TaskCenterView extends ItemView {
   }
 
   private handleFilterOutsidePointerDown(event: PointerEvent): void {
-    const isInsideFilterControls = event.composedPath().some((target) => {
-      return target instanceof HTMLElement && !!target.closest("[data-saved-views]");
-    });
+    const isInside = isClickInsideFilterControls(event);
     if (!shouldCloseFilterPopoverOnPointerDown({
       isOpen: this.filterPopoverOpen !== null,
-      isInsideFilterControls,
+      isInsideFilterControls: isInside,
     })) return;
 
     this.filterPopoverOpen = null;
