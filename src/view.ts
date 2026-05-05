@@ -27,7 +27,7 @@ import { animateOut } from "./anim";
 import { TabDwellTracker } from "./view/dnd";
 import { UndoStack, UndoEntry, UndoOp } from "./view/undo";
 import { BottomSheet } from "./view/bottom-sheet";
-import { attachCardGestures } from "./view/touch";
+import { attachCardGestures, attachLongPress } from "./view/touch";
 import { shouldCloseFilterPopoverOnPointerDown, isClickInsideFilterControls } from "./view/filter-popover";
 import { isMobileMode } from "./platform";
 import { openTaskSourceEditShell } from "./view/source-dialog";
@@ -706,7 +706,15 @@ export class TaskCenterView extends ItemView {
       this.openSavedViewMenu(event, view);
     });
 
-    // ── Tab drag-to-reorder ──
+    // UX-mobile §3.2: long-press on a tab opens the tab management sheet
+    // on mobile (desktop uses right-click / contextmenu instead).
+    if (isMobileMode()) {
+      attachLongPress(btn, {
+        durationMs: this.plugin.settings.mobileLongPressMs,
+        moveThresholdPx: 4,
+        onTrigger: () => this.openTabManagementSheet(view),
+      });
+    }    // ── Tab drag-to-reorder ──
     btn.addEventListener("dragstart", (e) => {
       if (!e.dataTransfer) return;
       e.dataTransfer.effectAllowed = "move";
@@ -787,6 +795,75 @@ export class TaskCenterView extends ItemView {
   /**
    * VAL-GUI-005: overflow tabs are first-class Query Tabs rendered in a sheet.
    * Each entry carries data-tab-id, badge/dirty/default metadata, and full
+   * UX-mobile §3.2: long-press a tab → bottom sheet with full management
+   * actions: rename, copy, edit Query, set default, move L/R, hide, delete.
+   * Mirrors the desktop right-click `openSavedViewMenu` but rendered as
+   * large tap targets in a mobile-friendly sheet.
+   */
+  private openTabManagementSheet(view: QueryPreset): void {
+    const sheet = new BottomSheet(this.app, {
+      title: view.name,
+      populate: (el) => {
+        const actions = el.createDiv({ cls: "bt-sheet-actions" });
+
+        const addBtn = (text: string, fn: () => void | Promise<void>) => {
+          const b = actions.createEl("button", {
+            cls: "bt-sheet-action",
+            text,
+          });
+          b.addEventListener("click", () => {
+            sheet.close();
+            Promise.resolve(fn()).catch((err) =>
+              new Notice(tr("notice.error", {
+                msg: (err as Error).message,
+              }), 4000),
+            );
+          });
+        };
+
+        const presets = this.plugin.settings.queryPresets;
+        const idx = presets.findIndex((p) => p.id === view.id);
+
+        addBtn(tr("savedViews.rename"), () => this.renameSavedView(view));
+        addBtn(tr("savedViews.copy"), () => this.copySavedView(view));
+        addBtn(tr("savedViews.editQuery"), () => this.openQueryControlsSheet());
+        addBtn(tr("savedViews.setDefault"), () => this.setDefaultSavedView(view.id));
+
+        if (idx > 0) {
+          addBtn(tr("savedViews.moveLeft"), () => this.moveSavedView(view, -1));
+        } else {
+          actions.createEl("button", {
+            cls: "bt-sheet-action bt-sheet-action-disabled",
+            text: tr("savedViews.moveLeft"),
+          });
+        }
+
+        if (idx >= 0 && idx < presets.length - 1) {
+          addBtn(tr("savedViews.moveRight"), () => this.moveSavedView(view, 1));
+        } else {
+          actions.createEl("button", {
+            cls: "bt-sheet-action bt-sheet-action-disabled",
+            text: tr("savedViews.moveRight"),
+          });
+        }
+
+        addBtn(
+          view.hidden ? tr("savedViews.show") : tr("savedViews.hide"),
+          () => this.toggleSavedViewHidden(view, !view.hidden),
+        );
+
+        if (!view.builtin) {
+          addBtn(tr("savedViews.delete"), () => this.deleteSavedViewWithConfirm(view));
+        }
+      },
+    });
+    sheet.open();
+  }
+
+  /**
+   * VAL-GUI-005: overflow tabs are first-class Query Tabs rendered in a sheet.
+   * UX-mobile §3.1: "更多" opens a bottom sheet (not a menu) listing
+   * overflow Query Tabs with order, badge, default status, and full
    * management actions (rename, copy, set default, move, hide, delete).
    */
   private openOverflowTabsSheet(overflowTabs: QueryPreset[]): void {
@@ -2855,13 +2932,30 @@ export class TaskCenterView extends ItemView {
         // etc. instead of the raw EN literals. The two
         // ⏳ <date> entries keep the date verbatim — the i18n template
         // wraps it without reformatting (locale-stable per US-411).
+        // UX-mobile §8.1: action sheet includes done, schedule today/tomorrow,
+        // custom date, clear schedule, nest, edit tag, drop.
         btn(
           t.effectiveStatus === "done" ? tr("sheet.markUndone") : tr("sheet.done"),
           () => (t.effectiveStatus === "done" ? this.api.undone(t.id) : this.api.done(t.id)),
         );
         btn(tr("sheet.scheduleAt", { date: today }), () => this.api.schedule(t.id, today));
         btn(tr("sheet.scheduleAt", { date: tomorrow }), () => this.api.schedule(t.id, tomorrow));
+        btn(tr("sheet.scheduleCustom"), async () => {
+          // UX-mobile §8.2: 改期 opens a date picker with quick presets + calendar
+          const date = await this.openDatePicker();
+          if (date !== null) await this.api.schedule(t.id, date);
+        });
         btn(tr("sheet.scheduleClear"), () => this.api.schedule(t.id, null));
+        btn(tr("sheet.nest"), async () => {
+          // UX-mobile §8.3: nest opens a parent picker bottom sheet
+          const parentId = await this.openParentPickerForTask(t);
+          if (parentId !== null) await this.api.nest(t.id, parentId);
+        });
+        btn(tr("sheet.editTag"), async () => {
+          // UX-mobile §8.1: edit tag opens a tag editor
+          const newTag = await this.openTagEditorForTask(t);
+          if (newTag !== null) await this.api.tag(t.id, newTag);
+        });
         btn(tr("sheet.drop"), () => this.api.drop(t.id));
       },
     });
@@ -2904,6 +2998,125 @@ export class TaskCenterView extends ItemView {
       },
     });
     sheet.open();
+  }
+
+  /**
+   * Opens a date-picker modal and returns the resolved ISO date string,
+   * null for "clear", or null for cancelled (Escape / close without Enter).
+   */
+  private openDatePicker(): Promise<string | null> {
+    return new Promise((resolve) => {
+      const modal = new DatePromptModal(
+        this.app,
+        tr("sheet.scheduleCustom"),
+        "",
+        (iso) => {
+          if (iso === undefined) resolve(null);
+          else resolve(iso);
+        },
+      );
+      modal.open();
+    });
+  }
+
+  /**
+   * Opens a bottom sheet listing all non-done tasks for parent selection.
+   * Returns the selected parent task id, or null if cancelled.
+   * UX-mobile §8.3: self and descendants are disabled in the picker.
+   */
+  private openParentPickerForTask(t: EffectiveTask): Promise<string | null> {
+    return new Promise((resolve) => {
+      const sheet = new BottomSheet(this.app, {
+        title: tr("sheet.nest"),
+        populate: (el) => {
+          const search = el.createEl("input", {
+            type: "text",
+            placeholder: tr("toolbar.filter"),
+            cls: "bt-tag-search bt-parent-picker-search",
+          });
+
+          const list = el.createDiv({ cls: "bt-tag-options bt-parent-picker-list" });
+
+          const filterTasks = () => {
+            const q = search.value.toLowerCase();
+            list.empty();
+            const tasks = this.tasks.filter((c) =>
+              c.status !== "dropped" &&
+              c.id !== t.id &&
+              (!q || c.title.toLowerCase().includes(q)),
+            ).slice(0, 50);
+
+            if (tasks.length === 0) {
+              list.createDiv({ cls: "bt-menu-empty", text: tr("sheet.empty") });
+              return;
+            }
+            for (const c of tasks) {
+              const row = list.createDiv({ cls: "bt-menu-option" });
+              row.createSpan({ text: c.title });
+              row.addEventListener("click", () => {
+                sheet.close();
+                resolve(c.id);
+              });
+            }
+          };
+
+          search.addEventListener("input", filterTasks);
+          filterTasks();
+
+          // Close on backdrop = cancel
+          sheet.modalEl.addEventListener("click", (e) => {
+            if (e.target === sheet.modalEl) {
+              sheet.close();
+              resolve(null);
+            }
+          });
+        },
+      });
+      sheet.open();
+    });
+  }
+
+  /**
+   * Opens a simple text input bottom sheet for editing a tag on a task.
+   * Returns the new tag string, or null if cancelled.
+   */
+  private openTagEditorForTask(_t: EffectiveTask): Promise<string | null> {
+    return new Promise((resolve) => {
+      const sheet = new BottomSheet(this.app, {
+        title: tr("sheet.editTag"),
+        populate: (el) => {
+          const input = el.createEl("input", {
+            type: "text",
+            placeholder: "#tag",
+            cls: "bt-tag-search bt-tag-editor-input",
+          });
+
+          el.createDiv({ cls: "bt-menu-empty bt-tag-editor-hint", text: tr("prompt.dateHint") });
+
+          input.addEventListener("keydown", (e) => {
+            if (e.key === "Enter" && !e.isComposing) {
+              e.preventDefault();
+              const val = input.value.trim();
+              sheet.close();
+              resolve(val || null);
+            } else if (e.key === "Escape") {
+              sheet.close();
+              resolve(null);
+            }
+          });
+
+          window.setTimeout(() => input.focus(), 100);
+
+          sheet.modalEl.addEventListener("click", (e) => {
+            if (e.target === sheet.modalEl) {
+              sheet.close();
+              resolve(null);
+            }
+          });
+        },
+      });
+      sheet.open();
+    });
   }
 
   // ---------- Completed ----------
@@ -3364,43 +3577,101 @@ export class TaskCenterView extends ItemView {
       return;
     }
 
-    // ── Header row: X-axis column titles ──
-    if (viewModel.xAxis.buckets.length > 0) {
-      const headerRow = wrapper.createDiv({ cls: "bt-matrix-header" });
-      // Corner cell
-      headerRow.createDiv({ cls: "bt-matrix-corner", text: viewModel.yAxis.title || viewModel.xAxis.title });
-      for (const col of viewModel.xAxis.buckets) {
-        headerRow.createDiv({ cls: "bt-matrix-col-head", text: col.title });
+    // UX-mobile §5.4: on mobile, render as a vertical bucket list instead of
+    // a 2D grid. Each Y-axis bucket is a collapsible section showing
+    // its X-axis sub-buckets, preserving axis/bucket names.
+    const isMobile = this.contentEl.dataset.mobileLayout === "true";
+
+    if (isMobile) {
+      // ── Mobile: vertical bucket list ──
+      const yBuckets = new Map<string, { title: string; cells: typeof viewModel.cells }>();
+      for (const cell of viewModel.cells) {
+        const b = yBuckets.get(cell.rowId);
+        if (b) b.cells.push(cell);
+        else yBuckets.set(cell.rowId, { title: cell.rowTitle, cells: [cell] });
       }
-    }
 
-    // ── Grid rows: Y-axis buckets × X-axis buckets ──
-    // Group cells by rowId to render one row per Y-axis bucket
-    const grid = wrapper.createDiv({ cls: "bt-matrix-grid" });
-    const rowMap = new Map<string, typeof viewModel.cells>();
-    for (const cell of viewModel.cells) {
-      const row = rowMap.get(cell.rowId);
-      if (row) row.push(cell);
-      else rowMap.set(cell.rowId, [cell]);
-    }
+      for (const [rowId, bucket] of yBuckets) {
+        const section = wrapper.createDiv({ cls: "bt-matrix-mobile-bucket" });
+        section.dataset.matrixRow = rowId;
 
-    for (const [_rowId, rowCells] of rowMap) {
-      const rowEl = grid.createDiv({ cls: "bt-matrix-row" });
-      // Row label (Y-axis bucket title)
-      rowEl.createDiv({ cls: "bt-matrix-row-label", text: rowCells[0]?.rowTitle ?? "" });
+        const head = section.createDiv({ cls: "bt-matrix-mobile-bucket-head" });
+        head.createSpan({ text: bucket.title, cls: "bt-matrix-mobile-bucket-title" });
+        const count = bucket.cells.reduce((s, c) => s + c.tasks.length, 0);
+        head.createSpan({
+          text: String(count),
+          cls: "bt-matrix-mobile-bucket-count",
+        });
 
-      // Row cells (one per X-axis bucket)
-      for (const cell of rowCells) {
-        const cellEl = rowEl.createDiv({ cls: "bt-matrix-cell" });
-        cellEl.dataset.matrixRow = cell.rowId;
-        cellEl.dataset.matrixCol = cell.colId;
+        const body = section.createDiv({ cls: "bt-matrix-mobile-bucket-body" });
 
-        if (cell.tasks.length === 0) {
-          cellEl.addClass("bt-matrix-cell-empty");
-        } else {
-          const cellList = cellEl.createDiv({ cls: "bt-matrix-cell-list" });
-          for (const task of cell.tasks) {
-            this.renderCard(cellList, task);
+        for (const cell of bucket.cells) {
+          const subSection = body.createDiv({ cls: "bt-matrix-mobile-sub-bucket" });
+          const subHead = subSection.createDiv({ cls: "bt-matrix-mobile-sub-head" });
+          subHead.createSpan({ text: cell.colTitle, cls: "bt-matrix-mobile-sub-title" });
+          subHead.createSpan({
+            text: String(cell.tasks.length),
+            cls: "bt-matrix-mobile-sub-count",
+          });
+
+          if (cell.tasks.length === 0) {
+            subSection.createDiv({
+              text: tr("matrix.empty"),
+              cls: "bt-matrix-mobile-sub-empty",
+            });
+          } else {
+            const cellList = subSection.createDiv({ cls: "bt-matrix-mobile-sub-list" });
+            for (const task of cell.tasks) {
+              this.renderCard(cellList, task);
+            }
+          }
+        }
+
+        // Toggle collapse on head tap
+        head.addEventListener("click", () => {
+          body.classList.toggle("collapsed");
+        });
+      }
+    } else {
+      // ── Desktop: 2D grid (existing behavior) ──
+      // ── Header row: X-axis column titles ──
+      if (viewModel.xAxis.buckets.length > 0) {
+        const headerRow = wrapper.createDiv({ cls: "bt-matrix-header" });
+        // Corner cell
+        headerRow.createDiv({ cls: "bt-matrix-corner", text: viewModel.yAxis.title || viewModel.xAxis.title });
+        for (const col of viewModel.xAxis.buckets) {
+          headerRow.createDiv({ cls: "bt-matrix-col-head", text: col.title });
+        }
+      }
+
+      // ── Grid rows: Y-axis buckets × X-axis buckets ──
+      // Group cells by rowId to render one row per Y-axis bucket
+      const grid = wrapper.createDiv({ cls: "bt-matrix-grid" });
+      const rowMap = new Map<string, typeof viewModel.cells>();
+      for (const cell of viewModel.cells) {
+        const row = rowMap.get(cell.rowId);
+        if (row) row.push(cell);
+        else rowMap.set(cell.rowId, [cell]);
+      }
+
+      for (const [_rowId, rowCells] of rowMap) {
+        const rowEl = grid.createDiv({ cls: "bt-matrix-row" });
+        // Row label (Y-axis bucket title)
+        rowEl.createDiv({ cls: "bt-matrix-row-label", text: rowCells[0]?.rowTitle ?? "" });
+
+        // Row cells (one per X-axis bucket)
+        for (const cell of rowCells) {
+          const cellEl = rowEl.createDiv({ cls: "bt-matrix-cell" });
+          cellEl.dataset.matrixRow = cell.rowId;
+          cellEl.dataset.matrixCol = cell.colId;
+
+          if (cell.tasks.length === 0) {
+            cellEl.addClass("bt-matrix-cell-empty");
+          } else {
+            const cellList = cellEl.createDiv({ cls: "bt-matrix-cell-list" });
+            for (const task of cell.tasks) {
+              this.renderCard(cellList, task);
+            }
           }
         }
       }

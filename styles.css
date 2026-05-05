@@ -2059,6 +2059,71 @@
     overflow: hidden;
   }
 
+  /* ───── Mobile Matrix: vertical bucket list (US-103a / UX-mobile §5.4) ───── */
+  .task-center-view[data-mobile-layout="true"] .bt-matrix-header,
+  .task-center-view[data-mobile-layout="true"] .bt-matrix-grid {
+    display: none;
+  }
+  .task-center-view[data-mobile-layout="true"] .bt-matrix-mobile-bucket {
+    border: 1px solid var(--background-modifier-border);
+    border-radius: 8px;
+    margin-bottom: 8px;
+    background: var(--background-secondary);
+  }
+  .task-center-view[data-mobile-layout="true"] .bt-matrix-mobile-bucket-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 12px;
+    cursor: pointer;
+    user-select: none;
+  }
+  .task-center-view[data-mobile-layout="true"] .bt-matrix-mobile-bucket-title {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text-normal);
+    flex: 1;
+  }
+  .task-center-view[data-mobile-layout="true"] .bt-matrix-mobile-bucket-count {
+    font-size: 11px;
+    color: var(--text-muted);
+    background: var(--background-modifier-border);
+    padding: 1px 7px;
+    border-radius: 10px;
+  }
+  .task-center-view[data-mobile-layout="true"] .bt-matrix-mobile-bucket-body.collapsed {
+    display: none;
+  }
+  .task-center-view[data-mobile-layout="true"] .bt-matrix-mobile-sub-bucket {
+    padding: 6px 12px 8px;
+    border-top: 1px solid var(--background-modifier-border);
+  }
+  .task-center-view[data-mobile-layout="true"] .bt-matrix-mobile-sub-head {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 4px;
+  }
+  .task-center-view[data-mobile-layout="true"] .bt-matrix-mobile-sub-title {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-muted);
+  }
+  .task-center-view[data-mobile-layout="true"] .bt-matrix-mobile-sub-count {
+    font-size: 10px;
+    color: var(--text-faint);
+  }
+  .task-center-view[data-mobile-layout="true"] .bt-matrix-mobile-sub-empty {
+    font-size: 11px;
+    color: var(--text-faint);
+    padding: 4px 0;
+  }
+  .task-center-view[data-mobile-layout="true"] .bt-matrix-mobile-sub-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
 /* ───── Bottom sheet primitive (used by US-504 day list, M-3 long-press) ───── */
 .modal-container.task-center-bottom-sheet,
 .task-center-bottom-sheet.modal {
@@ -2144,6 +2209,29 @@
 }
 .task-center-bottom-sheet .bt-sheet-action:active {
   background: var(--background-modifier-hover);
+}
+.task-center-bottom-sheet .bt-sheet-action-disabled {
+  opacity: 0.4;
+  pointer-events: none;
+}
+
+/* Parent picker for mobile nest action (UX-mobile §8.3) */
+.task-center-bottom-sheet .bt-parent-picker-search {
+  width: 100%;
+  margin-bottom: 8px;
+}
+.task-center-bottom-sheet .bt-parent-picker-list {
+  max-height: 50vh;
+  overflow-y: auto;
+}
+
+/* Tag editor for mobile edit-tag action (UX-mobile §8.1) */
+.task-center-bottom-sheet .bt-tag-editor-input {
+  width: 100%;
+  margin-bottom: 8px;
+}
+.task-center-bottom-sheet .bt-tag-editor-hint {
+  font-size: 11px;
 }
 
 .task-center-bottom-sheet .bt-mobile-filter-sheet .bt-saved-views {

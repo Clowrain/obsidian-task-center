@@ -227,6 +227,9 @@ const EN = {
   "sheet.scheduleAt": "⏳ {date}",
   "sheet.scheduleClear": "⏳ —",
   "sheet.drop": "Abandon",
+  "sheet.scheduleCustom": "⏳ Pick a date…",
+  "sheet.nest": "Set as subtask…",
+  "sheet.editTag": "Edit tag",
 
   // task #43: date prompt hint line — bilingual EN baseline (the original
   // hard-coded string already mixed today/tomorrow with 明天/周六; we
@@ -551,6 +554,9 @@ const ZH: Partial<typeof EN> = {
   "sheet.scheduleAt": "⏳ {date}",
   "sheet.scheduleClear": "⏳ —",
   "sheet.drop": "放弃",
+  "sheet.scheduleCustom": "⏳ 改期…",
+  "sheet.nest": "设为子任务…",
+  "sheet.editTag": "编辑 tag",
 
   // task #43: 日期弹窗提示
   "prompt.dateHint":
