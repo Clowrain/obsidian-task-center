@@ -9,8 +9,10 @@ import {
   formatStats,
   formatAgentBrief,
   formatReviewSummary,
+  formatQueryRun,
   formatOkWrite,
   formatAdd,
+  type QueryRunResult,
 } from "./cli";
 import { TaskCache } from "./cache";
 import { StatusBar } from "./status-bar";
@@ -541,6 +543,18 @@ export default class TaskCenterPlugin extends Plugin {
       (args) => this.cliQueryShow(args),
     );
 
+    this.registerCliHandler(
+      "task-center:query-run",
+      "Run a saved query preset and render its view",
+      {
+        id: { value: "<preset-id>", description: "Saved query preset id", required: true },
+        view: { value: "list|week|month|matrix", description: "Temporary view override" },
+        anchor: { value: "YYYY-MM-DD", description: "Date anchor for week/month projection" },
+        format: { value: "text|json", description: "Output format (default: text)" },
+      },
+      (args) => this.cliQueryRun(args),
+    );
+
     // VAL-CLI-006: query-create is an alias that reuses the same QueryPreset
     // create implementation as query-save (stable id, invalid_query rejection).
     this.registerCliHandler(
@@ -875,6 +889,7 @@ export default class TaskCenterPlugin extends Plugin {
         all.map((view) => ({
           id: view.id,
           name: view.name,
+          builtin: !!view.builtin,
           hidden: !!view.hidden,
           default: view.id === this.settings.defaultSavedViewId,
         })),
@@ -886,6 +901,7 @@ export default class TaskCenterPlugin extends Plugin {
     const lines = [`${all.length} query presets`];
     for (const view of all) {
       const flags = [
+        view.builtin ? "builtin" : "custom",
         view.id === this.settings.defaultSavedViewId ? "default" : null,
         view.hidden ? "hidden" : "visible",
       ].filter(Boolean).join(" · ");
@@ -897,6 +913,22 @@ export default class TaskCenterPlugin extends Plugin {
   private cliQueryShow(args: CliArgs): string {
     const view = this.requireQueryPreset(requireArg(args.id, "id"));
     return stringifyQueryPreset(view);
+  }
+
+  private async cliQueryRun(args: CliArgs): Promise<string> {
+    const preset = this.requireQueryPreset(requireArg(args.id, "id"));
+    const view = args.view ? parseQueryViewType(args.view) : undefined;
+    const anchorISO = args.anchor ?? todayISO();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(anchorISO)) {
+      throw new TaskWriterError("invalid_date", `anchor requires YYYY-MM-DD: ${anchorISO}`);
+    }
+    const result = await this.api.runQueryPreset(preset, {
+      weekStartsOn: this.settings.weekStartsOn ?? 1,
+      anchorISO,
+      view,
+    });
+    if (args.format === "json") return JSON.stringify(toQueryRunJson(result), null, 2);
+    return formatQueryRun(result, { groupingTags: this.settings.groupingTags });
   }
 
   private async cliQuerySave(args: CliArgs): Promise<string> {
@@ -1035,6 +1067,97 @@ function requireArg(v: string | undefined, name: string): string {
     throw new TaskWriterError("invalid_date", `${name} is required (pass ${name}=<value>)`);
   }
   return v;
+}
+
+function parseQueryViewType(raw: string): "list" | "week" | "month" | "matrix" {
+  if (raw === "list" || raw === "week" || raw === "month" || raw === "matrix") return raw;
+  throw new TaskWriterError("invalid_query", `view must be list|week|month|matrix: ${raw}`);
+}
+
+function toQueryRunJson(result: QueryRunResult): unknown {
+  return {
+    preset: {
+      id: result.preset.id,
+      name: result.preset.name,
+      builtin: result.preset.builtin,
+      hidden: result.preset.hidden,
+    },
+    view: result.view,
+    anchor: result.anchorISO,
+    total: result.filteredTasks.length,
+    summary: result.summary,
+    model: mapViewModel(result.viewModel),
+  };
+}
+
+function mapViewModel(model: QueryRunResult["viewModel"]): unknown {
+  if (model.type === "list") {
+    return {
+      type: "list",
+      sections: model.sections.map((section) => ({
+        title: section.title,
+        tasks: section.tasks.map(queryRunTaskJson),
+      })),
+    };
+  }
+  if (model.type === "week") {
+    return {
+      type: "week",
+      days: model.days.map((day) => ({
+        date: day.date,
+        tasks: day.tasks.map(queryRunTaskJson),
+      })),
+      tray: model.tray ? {
+        title: model.tray.title,
+        tasks: model.tray.tasks.map(queryRunTaskJson),
+      } : null,
+    };
+  }
+  if (model.type === "month") {
+    return {
+      type: "month",
+      cells: model.cells.map((cell) => ({
+        date: cell.date,
+        tasks: cell.tasks.map(queryRunTaskJson),
+      })),
+      tray: model.tray ? {
+        title: model.tray.title,
+        tasks: model.tray.tasks.map(queryRunTaskJson),
+      } : null,
+    };
+  }
+  return {
+    type: "matrix",
+    cells: model.cells.map((cell) => ({
+      rowId: cell.rowId,
+      rowTitle: cell.rowTitle,
+      colId: cell.colId,
+      colTitle: cell.colTitle,
+      tasks: cell.tasks.map(queryRunTaskJson),
+    })),
+    unmatched: model.unmatched.map(queryRunTaskJson),
+  };
+}
+
+function queryRunTaskJson(task: QueryRunResult["filteredTasks"][number]): unknown {
+  return {
+    id: task.id,
+    path: task.path,
+    line: task.line + 1,
+    status: task.effectiveStatus,
+    rawStatus: task.status,
+    title: task.title,
+    tags: task.tags,
+    scheduled: task.effectiveScheduled,
+    deadline: task.effectiveDeadline,
+    created: task.effectiveCreated,
+    completed: task.completed,
+    cancelled: task.cancelled,
+    estimate_minutes: task.estimate,
+    actual_minutes: task.actual,
+    parent_id: task.parentLine !== null ? `${task.path}:L${task.parentLine + 1}` : null,
+    children_ids: task.childrenLines.map((line) => `${task.path}:L${line + 1}`),
+  };
 }
 
 function splitList(s: string): string[] {

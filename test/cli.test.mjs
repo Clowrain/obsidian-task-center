@@ -30,11 +30,13 @@ const {
   computeStats,
   buildAgentBrief,
   buildReviewSummary,
+  TaskCenterApi,
   formatList,
   formatShow,
   formatStats,
   formatAgentBrief,
   formatReviewSummary,
+  formatQueryRun,
   formatOkWrite,
   formatAdd,
   formatError,
@@ -707,4 +709,89 @@ test("formatError — invalid_query reports DSL error", () => {
 test("formatError — nest_partial cross-file failure", () => {
   const out = formatError("nest_partial", "nested into parent.md but child.md:L5 drifted");
   assert.match(out, /^error\s+nest_partial/);
+});
+
+test("US-220: runQueryPreset can show preset-today through a temporary week view", async () => {
+  const api = new TaskCenterApi({}, {
+    ensureAll: async () => [
+      mkTask({ id: "Tasks.md:L1", path: "Tasks.md", line: 0, title: "Monday task", rawLine: "- [ ] Monday task ⏳ 2026-05-04", scheduled: "2026-05-04" }),
+      mkTask({ id: "Tasks.md:L2", path: "Tasks.md", line: 1, title: "Wednesday task", rawLine: "- [ ] Wednesday task ⏳ 2026-05-06", scheduled: "2026-05-06" }),
+      mkTask({ id: "Tasks.md:L3", path: "Tasks.md", line: 2, title: "Done task", rawLine: "- [x] Done task ✅ 2026-05-04", status: "done", completed: "2026-05-04" }),
+    ],
+  });
+
+  const result = await api.runQueryPreset(
+    {
+      id: "preset-today",
+      name: "Today",
+      builtin: true,
+      hidden: false,
+      filters: { status: ["todo"] },
+      view: { type: "list", preset: "today" },
+      summary: [{ type: "count" }],
+    },
+    { weekStartsOn: 1, anchorISO: "2026-05-04", view: "week" },
+  );
+
+  assert.equal(result.viewModel.type, "week");
+  assert.equal(result.view.type, "week");
+  assert.equal(result.filteredTasks.length, 2);
+  assert.deepEqual(result.viewModel.days.map((day) => day.date), [
+    "2026-05-04",
+    "2026-05-05",
+    "2026-05-06",
+    "2026-05-07",
+    "2026-05-08",
+    "2026-05-09",
+    "2026-05-10",
+  ]);
+  assert.deepEqual(result.viewModel.days.map((day) => day.tasks.map((task) => task.id)), [
+    ["Tasks.md:L1"],
+    [],
+    ["Tasks.md:L2"],
+    [],
+    [],
+    [],
+    [],
+  ]);
+
+  const text = formatQueryRun(result);
+  assert.match(text, /Query preset-today · Today/);
+  assert.match(text, /view week · 2 tasks · anchor 2026-05-04/);
+  assert.match(text, /summary count=2/);
+  assert.match(text, /2026-05-05 · 0 tasks\n    —/);
+  assert.match(text, /Tasks\.md:L1\s+\[ \].*Monday task/);
+});
+
+test("US-220: runQueryPreset projects month view by dated cells", async () => {
+  const api = new TaskCenterApi({}, {
+    ensureAll: async () => [
+      mkTask({ id: "Tasks.md:L1", path: "Tasks.md", line: 0, title: "May task", rawLine: "- [ ] May task ⏳ 2026-05-08", scheduled: "2026-05-08" }),
+      mkTask({ id: "Tasks.md:L2", path: "Tasks.md", line: 1, title: "June task", rawLine: "- [ ] June task ⏳ 2026-06-01", scheduled: "2026-06-01" }),
+    ],
+  });
+
+  const result = await api.runQueryPreset(
+    {
+      id: "preset-month",
+      name: "Month",
+      builtin: true,
+      hidden: false,
+      filters: { status: ["todo"] },
+      view: { type: "month" },
+      summary: [],
+    },
+    { weekStartsOn: 1, anchorISO: "2026-05-08" },
+  );
+
+  assert.equal(result.viewModel.type, "month");
+  assert.equal(result.viewModel.cells.length, 31);
+  const may8 = result.viewModel.cells.find((cell) => cell.date === "2026-05-08");
+  assert.deepEqual(may8.tasks.map((task) => task.id), ["Tasks.md:L1"]);
+  assert.equal(result.viewModel.cells.some((cell) => cell.tasks.some((task) => task.id === "Tasks.md:L2")), false);
+
+  const text = formatQueryRun(result);
+  assert.match(text, /dated cells · 1\/31/);
+  assert.match(text, /2026-05-08 · 1 tasks/);
+  assert.doesNotMatch(text, /2026-06-01/);
 });

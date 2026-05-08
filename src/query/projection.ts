@@ -225,6 +225,7 @@ function computeTray(
 
 function projectWeek(
   tasks: EffectiveTask[],
+  traySourceTasks: EffectiveTask[],
   view: QueryPresetViewConfig,
   weekStartsOn: 0 | 1,
   anchorISO: string,
@@ -255,7 +256,7 @@ function projectWeek(
     // match the tray filter).
   }
 
-  const tray = computeTray(tasks, view, weekStartsOn, mainAreaIds);
+  const tray = computeTray(traySourceTasks, view, weekStartsOn, mainAreaIds);
 
   return {
     type: "week",
@@ -266,6 +267,7 @@ function projectWeek(
 
 function projectMonth(
   tasks: EffectiveTask[],
+  traySourceTasks: EffectiveTask[],
   view: QueryPresetViewConfig,
   anchorISO: string,
 ): MonthViewModel {
@@ -293,7 +295,7 @@ function projectMonth(
     }
   }
 
-  const tray = computeTray(tasks, view, 0, mainAreaIds);
+  const tray = computeTray(traySourceTasks, view, 0, mainAreaIds);
 
   return {
     type: "month",
@@ -428,14 +430,15 @@ export function applyViewProjection(
   view: QueryPresetViewConfig,
   weekStartsOn: 0 | 1,
   anchorISO: string = todayISO(),
+  traySourceTasks: EffectiveTask[] = tasks,
 ): ViewModel {
   switch (view.type) {
     case "list":
       return projectList(tasks, view);
     case "week":
-      return projectWeek(tasks, view, weekStartsOn, anchorISO);
+      return projectWeek(tasks, traySourceTasks, view, weekStartsOn, anchorISO);
     case "month":
-      return projectMonth(tasks, view, anchorISO);
+      return projectMonth(tasks, traySourceTasks, view, anchorISO);
     case "matrix":
       return projectMatrix(tasks, view, weekStartsOn);
     default:

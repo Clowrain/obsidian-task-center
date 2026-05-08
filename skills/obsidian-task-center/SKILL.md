@@ -37,6 +37,8 @@ Data stays inline markdown. Syntax:
 - "how accurate were my estimates" / "weekly review" → `task-center:stats`
 - "what should I do next" / "brief me on today" → `task-center:brief`
 - "end-of-day review" / "what happened this week" → `task-center:review`
+- "list/manage/edit query tabs" / "show saved query DSL" / "run a preset view" → `task-center:query-list` / `task-center:query-show` / `task-center:query-run`
+- "create/update/rename/copy/hide/delete/default a query tab" → `task-center:query-create` / `task-center:query-update` / `task-center:query-rename` / `task-center:query-copy` / `task-center:query-hide` / `task-center:query-delete` / `task-center:query-set-default`
 
 **Do not** use `Read`/`Write` directly on task files to mutate tasks — use the CLI so `vault.process` locking + parser conventions are respected. Reading files is fine when you want broader context (the task body, surrounding notes).
 
@@ -100,6 +102,64 @@ Use this when the user asks what to do next or wants a compact status overview b
 End-of-day / weekly retrospective summary. Reports today and rolling-week windows: done, abandoned, delayed-open tasks, estimate-vs-actual totals, grouping summaries, and sample task ids.
 
 Use this for shutdown reviews, weekly reviews, and "what actually happened?" questions. Prefer text output for user-facing summaries; use `format=json` only when you need to parse it.
+
+### Query Tab / Preset verbs
+
+Query Tabs are saved QueryPreset DSL objects. The CLI uses the same storage, schema, and validation as the GUI Query editor. Always target tabs by stable `id`, not display name.
+
+Read:
+
+```
+obsidian task-center:query-list
+obsidian task-center:query-list hidden=true format=json
+obsidian task-center:query-show id=preset-week
+obsidian task-center:query-run id=preset-today
+obsidian task-center:query-run id=preset-today view=week anchor=2026-05-04
+obsidian task-center:query-run id=preset-week view=month anchor=2026-05-01 format=json
+```
+
+`query-list` text output includes `id`, `name`, `builtin|custom`, `default`, and `hidden|visible`. JSON output returns:
+
+```json
+[
+  { "id": "preset-week", "name": "Week", "builtin": true, "hidden": false, "default": false }
+]
+```
+
+`query-run` executes the preset DSL against current vault tasks and renders the result by view:
+
+- default: uses the preset's saved `view`.
+- `view=list|week|month|matrix`: temporary display override; it does not save back to the preset.
+- `anchor=YYYY-MM-DD`: week/month cursor date. Week output shows all 7 days with counts; month text output shows dated cells that contain tasks, while JSON contains all month cells.
+- all task rows keep stable ids like `Tasks/Inbox.md:L42` so you can pipe into `show`, `schedule`, `done`, or `abandon`.
+
+Create or update DSL:
+
+```
+obsidian task-center:query-create dsl='{"name":"工作","filters":{"tags":["#work"],"status":["todo"]},"view":{"type":"list"},"summary":[{"type":"count"}]}'
+obsidian task-center:query-update id=sv-alpha dsl='{"name":"工作周","filters":{"tags":["#work"],"time":{"scheduled":"week"},"status":["todo"]},"view":{"type":"week"},"summary":[{"type":"count"}]}'
+```
+
+`query-save` is kept as an alias for `query-create`. Create always allocates a new id, even if the DSL contains one. Update preserves the target id and builtin/custom identity.
+
+Manage tabs:
+
+```
+obsidian task-center:query-rename id=sv-alpha name="深度工作"
+obsidian task-center:query-copy id=preset-week name="我的本周"
+obsidian task-center:query-hide id=preset-week hidden=true
+obsidian task-center:query-hide id=preset-week hidden=false
+obsidian task-center:query-delete id=sv-alpha
+obsidian task-center:query-set-default id=preset-week
+obsidian task-center:query-set-default id=null
+```
+
+Rules:
+
+- Builtin tabs can be hidden/unhidden, copied, renamed, updated, and set as default, but cannot be permanently deleted.
+- Deleting a custom Query Tab deletes only that saved view, never tasks.
+- Hidden tabs cannot be set as default.
+- Invalid DSL fails with `error invalid_query` and leaves settings unchanged.
 
 ### Write verbs (idempotent, safe to retry)
 

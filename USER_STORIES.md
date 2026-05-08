@@ -820,6 +820,8 @@ npx skills add CorrectRoadH/obsidian-task-center
 
 `US-219` CLI 与 GUI 共用同一份 DSL schema 与校验规则。
 
+`US-220` CLI 能按某个 query tab / preset 的 DSL 执行查询，并按该 preset 的 view 展示结果。用户或 AI 可以查看 `preset-today` 的默认 list，也可以临时指定 `view=week` 或 `view=month`，用同一份 filters 看周 / 月分布。CLI 展示必须保留稳定任务 id，week 按 7 天分组，month 按日期分组，list 按 section / 任务树分组；JSON 输出要暴露 view model，方便代理继续处理。
+
 ## 17. 精力管理故事
 
 `US-301` 用户可以按自己的优先级方法管理任务。Task Center 只提供 tag / inline field / query / matrix / summary 这些通用能力，不内置方法论。

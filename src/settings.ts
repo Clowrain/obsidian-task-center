@@ -176,6 +176,7 @@ export class TaskCenterSettingTab extends PluginSettingTab {
         "obsidian task-center:list scheduled=unscheduled tag='#tag'",
         "obsidian task-center:query-list format=json",
         "obsidian task-center:query-show id=preset-week",
+        "obsidian task-center:query-run id=preset-today view=week anchor=2026-05-04",
         "obsidian task-center:query-save dsl='{\"name\":\"工作\",\"filters\":{\"tags\":[\"#work\"]},\"view\":{\"type\":\"list\"}}'",
         "obsidian task-center:query-update id=sv-alpha dsl='{\"name\":\"工作周\",\"view\":{\"type\":\"week\"}}'",
         "obsidian task-center:schedule ref=Tasks/Inbox.md:L42 date=2026-04-25",

@@ -1,5 +1,5 @@
 import { App } from "obsidian";
-import { ParsedTask, TaskStatus } from "./types";
+import { ParsedTask, TaskStatus, type QueryPreset, type QueryPresetViewConfig, type QueryViewType } from "./types";
 import { formatMinutes } from "./parser";
 import {
   setScheduled,
@@ -22,6 +22,10 @@ import { todayISO, resolveWhen, isValidISO } from "./dates";
 import { t as tr } from "./i18n";
 import { cliGroupingLabel, normalizeGroupingTags } from "./grouping";
 import { deriveEffectiveTasks, type EffectiveTask } from "./task-tree";
+import { normalizeQueryPreset } from "./saved-views";
+import { applyQueryFilters } from "./query/filter";
+import { applyViewProjection, type ViewModel } from "./query/projection";
+import { computeSummary, type SummaryResultItem } from "./query/summary";
 
 // REMINDER: this module must NOT call `parseVaultTasks` or
 // `app.vault.getMarkdownFiles()` directly. All parse work goes through
@@ -66,6 +70,21 @@ export interface ReviewOpts {
   days?: number;
   limit?: number;
   groupingTags?: string[];
+}
+
+export interface QueryRunOpts {
+  weekStartsOn: 0 | 1;
+  anchorISO?: string;
+  view?: QueryViewType;
+}
+
+export interface QueryRunResult {
+  preset: QueryPreset;
+  view: QueryPresetViewConfig;
+  anchorISO: string;
+  filteredTasks: EffectiveTask[];
+  summary: SummaryResultItem[];
+  viewModel: ViewModel;
 }
 
 export interface AgentBriefAction {
@@ -188,6 +207,22 @@ export class TaskCenterApi {
   async review(opts: ReviewOpts = {}): Promise<ReviewResult> {
     const all = await this.cache.ensureAll();
     return buildReviewSummary(all, opts);
+  }
+
+  async runQueryPreset(preset: QueryPreset, opts: QueryRunOpts): Promise<QueryRunResult> {
+    const normalized = normalizeQueryPreset(preset);
+    const effective = deriveEffectiveTasks(await this.cache.ensureAll());
+    const view = normalizeViewOverride(normalized.view, opts.view);
+    const filtered = applyQueryFilters(effective, normalized.filters, opts.weekStartsOn, opts.anchorISO ?? todayISO());
+    const viewModel = applyViewProjection(filtered, view, opts.weekStartsOn, opts.anchorISO ?? todayISO(), effective);
+    return {
+      preset: normalized,
+      view,
+      anchorISO: opts.anchorISO ?? todayISO(),
+      filteredTasks: filtered,
+      summary: computeSummary(filtered, normalized.summary),
+      viewModel,
+    };
   }
 
   async schedule(id: string, date: string | null) {
@@ -341,6 +376,11 @@ export class TaskCenterApi {
     if (!parent) throw new TaskWriterError("not_found", `parent: ${parentId}`);
     return await nestUnder(this.app, child, parent);
   }
+}
+
+function normalizeViewOverride(view: QueryPresetViewConfig, override?: QueryViewType): QueryPresetViewConfig {
+  if (!override) return view;
+  return { ...view, type: override };
 }
 
 function collectDescendants(task: ParsedTask, sameFileTasks: ParsedTask[]): ParsedTask[] {
@@ -811,6 +851,143 @@ export function formatList(tasks: ParsedTask[], header: string, opts: CliFormatO
     renderTree(t, tasks, out, rendered, 0, opts);
   }
   return out.join("\n");
+}
+
+export function formatQueryRun(result: QueryRunResult, opts: CliFormatOptions = {}): string {
+  const lines: string[] = [];
+  lines.push(`Query ${result.preset.id} · ${result.preset.name}`);
+  lines.push(`view ${result.view.type} · ${result.filteredTasks.length} tasks · anchor ${result.anchorISO}`);
+  if (result.summary.length > 0) {
+    lines.push(`summary ${formatSummaryItems(result.summary)}`);
+  }
+  lines.push("");
+
+  switch (result.viewModel.type) {
+    case "list":
+      renderQueryList(lines, result.viewModel.sections, opts);
+      break;
+    case "week":
+      renderQueryWeek(lines, result.viewModel.days, result.viewModel.tray, opts);
+      break;
+    case "month":
+      renderQueryMonth(lines, result.viewModel.cells, result.viewModel.tray, opts);
+      break;
+    case "matrix":
+      renderQueryMatrix(lines, result.viewModel.cells, result.viewModel.unmatched, opts);
+      break;
+  }
+  return lines.join("\n");
+}
+
+function formatSummaryItems(items: SummaryResultItem[]): string {
+  return items.map((item) => {
+    if (item.type === "count") return `count=${item.value}`;
+    if (item.type === "sum") return `sum(${item.field})=${item.formatted ?? `${item.value}m`}`;
+    if (item.type === "ratio") return `ratio(${item.numerator}/${item.denominator})=${item.formatted ?? `${item.value}%`}`;
+    if (item.type === "top_n") return `top_n(${item.by})=${item.items.map((row) => `${row.key}:${row.count}`).join(",") || "—"}`;
+    return `group_by(${item.by})=${item.groups.map((row) => `${row.key}:${row.count}`).join(",") || "—"}`;
+  }).join("  ");
+}
+
+function renderQueryList(lines: string[], sections: Array<{ title: string; tasks: EffectiveTask[] }>, opts: CliFormatOptions): void {
+  for (const section of sections) {
+    lines.push(`${section.title} · ${section.tasks.length} tasks`);
+    renderTaskRows(section.tasks, lines, "    ", opts);
+    if (section.tasks.length === 0) lines.push("    —");
+  }
+}
+
+function renderQueryWeek(
+  lines: string[],
+  days: Array<{ date: string; tasks: EffectiveTask[] }>,
+  tray: { title: string; tasks: EffectiveTask[] } | undefined,
+  opts: CliFormatOptions,
+): void {
+  for (const day of days) {
+    lines.push(`${day.date} · ${day.tasks.length} tasks`);
+    renderTaskRows(day.tasks, lines, "    ", opts);
+    if (day.tasks.length === 0) lines.push("    —");
+  }
+  if (tray) {
+    lines.push("");
+    lines.push(`${tray.title} · ${tray.tasks.length} tasks`);
+    renderTaskRows(tray.tasks, lines, "    ", opts);
+  }
+}
+
+function renderQueryMonth(
+  lines: string[],
+  cells: Array<{ date: string; tasks: EffectiveTask[] }>,
+  tray: { title: string; tasks: EffectiveTask[] } | undefined,
+  opts: CliFormatOptions,
+): void {
+  const nonEmpty = cells.filter((cell) => cell.tasks.length > 0);
+  lines.push(`dated cells · ${nonEmpty.length}/${cells.length}`);
+  for (const cell of nonEmpty) {
+    lines.push(`${cell.date} · ${cell.tasks.length} tasks`);
+    renderTaskRows(cell.tasks, lines, "    ", opts);
+  }
+  if (nonEmpty.length === 0) lines.push("    —");
+  if (tray) {
+    lines.push("");
+    lines.push(`${tray.title} · ${tray.tasks.length} tasks`);
+    renderTaskRows(tray.tasks, lines, "    ", opts);
+  }
+}
+
+function renderQueryMatrix(
+  lines: string[],
+  cells: Array<{ rowTitle: string; colTitle: string; tasks: EffectiveTask[] }>,
+  unmatched: EffectiveTask[],
+  opts: CliFormatOptions,
+): void {
+  for (const cell of cells) {
+    if (cell.tasks.length === 0) continue;
+    lines.push(`${cell.rowTitle} / ${cell.colTitle} · ${cell.tasks.length} tasks`);
+    renderTaskRows(cell.tasks, lines, "    ", opts);
+  }
+  if (unmatched.length > 0) {
+    lines.push(`Unmatched · ${unmatched.length} tasks`);
+    renderTaskRows(unmatched, lines, "    ", opts);
+  }
+  if (cells.every((cell) => cell.tasks.length === 0) && unmatched.length === 0) lines.push("    —");
+}
+
+function renderTaskRows(tasks: EffectiveTask[], lines: string[], indent: string, opts: CliFormatOptions): void {
+  const byId = new Map<string, EffectiveTask>();
+  for (const task of tasks) byId.set(task.id, task);
+  const rendered = new Set<string>();
+  for (const task of tasks) {
+    if (rendered.has(task.id)) continue;
+    if (task.parentLine !== null && byId.has(`${task.path}:L${task.parentLine + 1}`)) continue;
+    renderEffectiveTree(task, tasks, lines, rendered, indent, 0, opts);
+  }
+}
+
+function renderEffectiveTree(
+  task: EffectiveTask,
+  all: EffectiveTask[],
+  lines: string[],
+  rendered: Set<string>,
+  indent: string,
+  depth: number,
+  opts: CliFormatOptions,
+): void {
+  rendered.add(task.id);
+  const prefix = indent + "    ".repeat(depth);
+  const meta = inlineEffectiveMeta(task);
+  lines.push(`${prefix}${formatTaskHeader(task, opts)}${meta ? `  ${meta}` : ""}`);
+  const children = all.filter((child) => child.path === task.path && child.parentLine === task.line);
+  for (const child of children) renderEffectiveTree(child, all, lines, rendered, indent, depth + 1, opts);
+}
+
+function inlineEffectiveMeta(task: EffectiveTask): string {
+  const parts: string[] = [];
+  if (task.effectiveScheduled) parts.push(`scheduled ${task.effectiveScheduled}`);
+  if (task.effectiveDeadline) parts.push(`deadline ${task.effectiveDeadline}`);
+  if (task.estimate) parts.push(`est ${shortEst(task.estimate)}`);
+  if (task.actual) parts.push(`actual ${shortEst(task.actual)}`);
+  return parts.join("  ");
 }
 
 function renderTree(

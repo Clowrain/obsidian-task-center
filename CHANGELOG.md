@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 0.8.3 — 2026-05-08
+
+- CLI: add `query-run` to execute a Query Tab preset and render list/week/month/matrix output, with optional temporary view override.
+- CLI: `query-list` now reports whether each Query Tab is builtin or custom in both text and JSON output.
+- Skill: document Query Tab listing, DSL inspection, create/update, rename/copy/hide/delete/default workflows for agents.
+
 ## 0.7.5 — 2026-04-29
 
 - Saved-view filters: close open popovers on outside click, add spacing between tag rows, and tighten status/date popover sizing so compact dialogs do not leave large empty areas.

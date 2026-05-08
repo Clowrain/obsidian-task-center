@@ -641,6 +641,7 @@ QueryPreset 动词调用 `QueryPresetService`：
 
 - `query-list`：列出 id、name、builtin、hidden、default。
 - `query-show id=<id>`：输出完整 DSL。
+- `query-run id=<id> [view=list|week|month|matrix] [anchor=YYYY-MM-DD]`：执行 QueryPreset filters，计算 summary，并按 view projection 输出结果；`view` 只覆盖本次展示，不写回 preset。
 - `query-create`：读取 DSL 创建 tab。
 - `query-update id=<id>`：校验后覆盖。
 - `query-rename` / `query-copy` / `query-hide` / `query-delete` / `query-set-default`。

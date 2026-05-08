@@ -98,6 +98,7 @@ async function compile() {
                   export function formatStats() { return ""; }
                   export function formatAgentBrief() { return ""; }
                   export function formatReviewSummary() { return ""; }
+                  export function formatQueryRun(result) { return "Query " + result.preset.id + " · " + result.preset.name + "\\nview " + result.view.type + " · " + result.filteredTasks.length + " tasks · anchor " + result.anchorISO; }
                   export function formatOkWrite() { return ""; }
                   export function formatAdd() { return ""; }
                 `);
@@ -332,10 +333,19 @@ test("loadSettings seeds built-in query tabs and migrates legacy defaultView/las
   assert.equal(plugin.settings.lastSavedViewId, "preset-completed");
 });
 
-test("query-list 默认隐藏 hidden preset，format=json 会带出 default/hidden 元数据", async () => {
+test("query-list 默认隐藏 hidden preset，format=json 会带出 builtin/default/hidden 元数据", async () => {
   const { plugin } = await createPluginForQueryCli({
     defaultSavedViewId: "sv-alpha",
     queryPresets: [
+      {
+        id: "preset-week",
+        name: "Week",
+        builtin: true,
+        hidden: false,
+        filters: { time: { scheduled: "week" }, status: ["todo"] },
+        view: { type: "week" },
+        summary: [],
+      },
       {
         id: "sv-alpha",
         name: "Alpha",
@@ -358,14 +368,16 @@ test("query-list 默认隐藏 hidden preset，format=json 会带出 default/hidd
   });
 
   const text = await plugin.cliQueryList({});
-  assert.match(text, /^1 query presets/m);
-  assert.match(text, /sv-alpha  Alpha  default · visible/);
+  assert.match(text, /^2 query presets/m);
+  assert.match(text, /preset-week  Week  builtin · visible/);
+  assert.match(text, /sv-alpha  Alpha  custom · default · visible/);
   assert.doesNotMatch(text, /sv-beta/);
 
   const json = JSON.parse(await plugin.cliQueryList({ hidden: "true", format: "json" }));
   assert.deepEqual(json, [
-    { id: "sv-alpha", name: "Alpha", hidden: false, default: true },
-    { id: "sv-beta", name: "Beta", hidden: true, default: false },
+    { id: "preset-week", name: "Week", builtin: true, hidden: false, default: false },
+    { id: "sv-alpha", name: "Alpha", builtin: false, hidden: false, default: true },
+    { id: "sv-beta", name: "Beta", builtin: false, hidden: true, default: false },
   ]);
 });
 
@@ -399,6 +411,42 @@ test("query-show 返回当前 preset 的 DSL JSON", async () => {
     view: { type: "month", preset: "today" },
     summary: [{ type: "count" }],
   });
+});
+
+test("US-220: query-run 支持临时 view 覆盖输出", async () => {
+  const { plugin } = await createPluginForQueryCli({
+    weekStartsOn: 1,
+    groupingTags: [],
+    queryPresets: [
+      {
+        id: "preset-today",
+        name: "Today",
+        builtin: true,
+        hidden: false,
+        filters: { status: ["todo"] },
+        view: { type: "list", preset: "today" },
+        summary: [{ type: "count" }],
+      },
+    ],
+  });
+  plugin.api = {
+    runQueryPreset: async (preset, opts) => ({
+      preset,
+      view: { ...preset.view, type: opts.view ?? preset.view.type },
+      anchorISO: opts.anchorISO,
+      filteredTasks: [],
+      summary: [{ type: "count", value: 0 }],
+      viewModel: {
+        type: "week",
+        days: ["2026-05-04", "2026-05-05", "2026-05-06", "2026-05-07", "2026-05-08", "2026-05-09", "2026-05-10"].map((date) => ({ date, tasks: [] })),
+      },
+    }),
+  };
+
+  const out = await plugin.cliQueryRun({ id: "preset-today", view: "week", anchor: "2026-05-04" });
+
+  assert.match(out, /Query preset-today · Today/);
+  assert.match(out, /view week · 0 tasks · anchor 2026-05-04/);
 });
 
 test("query-save 总是新建 preset id，而不是复用 DSL 里的 id", async () => {
