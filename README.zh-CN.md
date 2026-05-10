@@ -13,9 +13,9 @@ Task Center 是一个 Obsidian 插件：在 Obsidian Tasks markdown 之上，增
 - [-] 放弃旧方案 ❌ 2026-04-28
 ```
 
-<video src="https://github.com/CorrectRoadH/obsidian-task-center/raw/refs/heads/main/screenshots/week-drag.mp4" controls muted></video>
+[周视图拖拽演示](https://github.com/CorrectRoadH/obsidian-task-center/raw/refs/heads/main/screenshots/week-drag.mp4)
 
-<video src="https://github.com/CorrectRoadH/obsidian-task-center/raw/refs/heads/main/screenshots/month-drag.mp4" controls muted></video>
+[月视图拖拽演示](https://github.com/CorrectRoadH/obsidian-task-center/raw/refs/heads/main/screenshots/month-drag.mp4)
 
 ![Month view](screenshots/month.png)
 

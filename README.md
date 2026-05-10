@@ -13,9 +13,9 @@ It does not create a new database or task format. Your source of truth stays in 
 - [-] Retired idea ❌ 2026-04-28
 ```
 
-<video src="https://github.com/CorrectRoadH/obsidian-task-center/raw/refs/heads/main/screenshots/week-drag.mp4" controls muted></video>
+[Week drag demo](https://github.com/CorrectRoadH/obsidian-task-center/raw/refs/heads/main/screenshots/week-drag.mp4)
 
-<video src="https://github.com/CorrectRoadH/obsidian-task-center/raw/refs/heads/main/screenshots/month-drag.mp4" controls muted></video>
+[Month drag demo](https://github.com/CorrectRoadH/obsidian-task-center/raw/refs/heads/main/screenshots/month-drag.mp4)
 
 ![Month view](screenshots/month.png)
 
