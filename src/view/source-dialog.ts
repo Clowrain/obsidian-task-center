@@ -168,7 +168,7 @@ export async function openTaskSourceEditShell(
     overlay.remove();
     await opts.onSave?.();
     restoreHostLeaf();
-    requestAnimationFrame(() => restoreHostLeaf());
+    window.requestAnimationFrame(() => restoreHostLeaf());
     window.setTimeout(restoreHostLeaf, 0);
   };
   overlay.__sourceEditClose = destroy;

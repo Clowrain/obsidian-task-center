@@ -96,12 +96,12 @@ export class TabDwellTracker<TabKey extends string> {
       this.opts.onCommit(target);
       return;
     }
-    this.rafId = requestAnimationFrame(this.tick);
+    this.rafId = window.requestAnimationFrame(this.tick);
   };
 
   private cancelTick(): void {
     if (this.rafId !== null) {
-      cancelAnimationFrame(this.rafId);
+      window.cancelAnimationFrame(this.rafId);
       this.rafId = null;
     }
   }
