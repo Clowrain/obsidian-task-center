@@ -868,6 +868,8 @@ npx skills add CorrectRoadH/obsidian-task-center
 
 `US-605` 每个 GitHub Release 挂 `main.js`、`manifest.json`、`styles.css` 三个独立 asset。禁止把 build 产物 commit 回 main。
 
+`US-606` 每个 GitHub Release 的标准 asset 必须由 release workflow 生成 GitHub artifact attestation。维护者和用户能够用 GitHub CLI 验证 `main.js`、`manifest.json`、`styles.css` 的来源和完整性；缺少 attestation 时 release gate 视为不完整。
+
 ## 20. 故事变更规则
 
 1. 新故事取下一个空编号，写入对应章节。

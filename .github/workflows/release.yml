@@ -19,6 +19,8 @@ on:
 
 permissions:
   contents: write
+  id-token: write
+  attestations: write
 
 jobs:
   preflight:
@@ -139,6 +141,17 @@ jobs:
 
       - name: Build (produces main.js)
         run: pnpm run build
+
+      # US-606: generate GitHub artifact attestations for the exact
+      # release assets before uploading them. GitHub matches release assets
+      # by digest, so consumers can verify provenance with `gh attestation`.
+      - name: Generate artifact attestations
+        uses: actions/attest@v4
+        with:
+          subject-path: |
+            main.js
+            manifest.json
+            styles.css
 
       # US-604: release notes. Strategy:
       #   - find previous semver tag (skip the current one)

@@ -38,3 +38,26 @@ test("release workflow runs Obsidian e2e under Xvfb on ubuntu", async () => {
   const workflow = await readWorkflow("release.yml");
   assertLinuxObsidianE2eGate(workflow, "release.yml");
 });
+
+test("release workflow attests Obsidian release assets", async () => {
+  const workflow = await readWorkflow("release.yml");
+
+  assert.match(
+    workflow,
+    /id-token:\s*write/,
+    "release.yml must allow OIDC token minting for Sigstore artifact attestations",
+  );
+  assert.match(
+    workflow,
+    /attestations:\s*write/,
+    "release.yml must allow persisting GitHub artifact attestations",
+  );
+  assert.match(
+    workflow,
+    /uses:\s*actions\/attest@v4/,
+    "release.yml must generate artifact attestations before publishing assets",
+  );
+  assert.match(workflow, /subject-path:\s*\|\s*[\s\S]*main\.js/);
+  assert.match(workflow, /subject-path:\s*\|\s*[\s\S]*manifest\.json/);
+  assert.match(workflow, /subject-path:\s*\|\s*[\s\S]*styles\.css/);
+});

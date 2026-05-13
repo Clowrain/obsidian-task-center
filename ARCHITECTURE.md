@@ -821,6 +821,7 @@ E2E 等待 cache 刷新时使用 `data-test-cache-version`，不使用固定 sle
 - 每次发版更新 `versions.json`。
 - Release body 从 PR / issue 标题按 conventional 前缀分组生成，可手动覆写。
 - Release asset 挂 `main.js`、`manifest.json`、`styles.css`；禁止 build 产物 commit 回 main。
+- Release job 在上传 asset 前为 `main.js`、`manifest.json`、`styles.css` 生成 GitHub artifact attestation；workflow 需要 `id-token: write` 与 `attestations: write` 权限。
 
 CI 额外建议检查：
 

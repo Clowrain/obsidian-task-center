@@ -93,6 +93,7 @@ export class QuickAddModal extends Modal {
       // bodies arrive in subsequent chunks (b: inline hint, c: chips,
       // d: footer + e2e). UX.md §6.6.
       modalEl.addClass("task-center-quick-add-v2");
+      this.containerEl.addClass("task-center-quick-add-v2-container");
     }
     if (Platform.isMobile) {
       // Title kept on mobile (separate redesign track per task split).

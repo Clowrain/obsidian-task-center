@@ -1,6 +1,6 @@
 import esbuild from "esbuild";
 import process from "node:process";
-import builtins from "builtin-modules";
+import { builtinModules } from "node:module";
 
 const banner = `/*
 Obsidian Task Center — energy-aware task board + CLI
@@ -8,6 +8,7 @@ Built with esbuild.
 */`;
 
 const prod = process.argv[2] === "production";
+const nodeBuiltins = [...builtinModules, ...builtinModules.map((name) => `node:${name}`)];
 
 const context = await esbuild.context({
   banner: { js: banner },
@@ -27,7 +28,7 @@ const context = await esbuild.context({
     "@lezer/common",
     "@lezer/highlight",
     "@lezer/lr",
-    ...builtins,
+    ...nodeBuiltins,
   ],
   format: "cjs",
   target: "es2020",
