@@ -163,7 +163,7 @@ jobs:
         run: |
           set -euo pipefail
           TAG_VERSION="${GITHUB_REF#refs/tags/}"
-          PREV_TAG=$(git tag --list --sort=-v:refname | grep -v "^${TAG_VERSION}$" | head -1 || true)
+          PREV_TAG=$(git tag --list --sort=-v:refname | grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' | grep -v "^${TAG_VERSION}$" | head -1 || true)
           if [ -z "$PREV_TAG" ]; then
             RANGE="HEAD"
             HEADER="🎉 First tagged release."

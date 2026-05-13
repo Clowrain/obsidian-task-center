@@ -61,3 +61,13 @@ test("release workflow attests Obsidian release assets", async () => {
   assert.match(workflow, /subject-path:\s*\|\s*[\s\S]*manifest\.json/);
   assert.match(workflow, /subject-path:\s*\|\s*[\s\S]*styles\.css/);
 });
+
+test("release notes diff from the previous strict semver tag only", async () => {
+  const workflow = await readWorkflow("release.yml");
+
+  assert.match(
+    workflow,
+    /git tag --list --sort=-v:refname \| grep -E '\^\[0-9\]\+\\\.\[0-9\]\+\\\.\[0-9\]\+\$' \| grep -v "\^\$\{TAG_VERSION\}\$" \| head -1/,
+    "release notes must ignore non-release tags such as test-upload-delete-me when choosing the previous tag",
+  );
+});
