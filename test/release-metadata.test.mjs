@@ -25,6 +25,11 @@ test("release metadata is ready for Obsidian community plugin submission", async
     "all published versions use native CLI APIs and must require Obsidian 1.12.2+",
   );
   assert.equal(manifest.name, "Task Center");
+  assert.doesNotMatch(
+    manifest.description,
+    /\bobsidian\b/i,
+    "community plugin descriptions must omit the platform name",
+  );
   assert.equal(manifest.author, "CorrectRoadH");
   assert.equal(manifest.isDesktopOnly, false);
 });

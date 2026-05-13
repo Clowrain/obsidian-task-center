@@ -1,9 +1,9 @@
 {
   "id": "task-center",
   "name": "Task Center",
-  "version": "0.8.4",
+  "version": "0.8.5",
   "minAppVersion": "1.12.2",
-  "description": "AI-ready task board for Obsidian Tasks with day/week/month views, natural-language Quick Add, task trees, mobile gestures, and CLI commands over plain markdown.",
+  "description": "AI-ready task board with day/week/month views, natural-language Quick Add, task trees, mobile gestures, and CLI commands over plain markdown.",
   "author": "CorrectRoadH",
   "authorUrl": "https://github.com/CorrectRoadH",
   "isDesktopOnly": false

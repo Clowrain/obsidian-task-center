@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## 0.8.5 — 2026-05-13
+
+- Release: remove the platform name from the plugin description to satisfy community plugin directory validation.
+
 ## 0.8.4 — 2026-05-09
 
 - Performance: reduce repeated QueryPreset matrix bucket filtering and speed up week/month date placement.
