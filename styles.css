@@ -2151,12 +2151,39 @@
     grid-template-columns: 1fr;
     gap: 4px;
     overflow-x: visible;
-    min-height: var(--tc-week-min-height, 50vh);
+    min-height: 0;
   }
   .task-center-view[data-mobile-layout="true"] .bt-week-col {
     min-height: 0;
     width: 100%;
     box-sizing: border-box;
+    padding: 0;
+    overflow: hidden;
+  }
+  .task-center-view[data-mobile-layout="true"] .bt-week-head {
+    min-height: 44px;
+    padding: 0 10px;
+    border-bottom: 0;
+    align-items: center;
+  }
+  .task-center-view[data-mobile-layout="true"] .bt-week-dow {
+    font-size: 15px;
+  }
+  .task-center-view[data-mobile-layout="true"] .bt-week-date {
+    font-size: 12px;
+  }
+  .task-center-view[data-mobile-layout="true"] .bt-week-stats {
+    margin-left: auto;
+    font-size: 11px;
+    color: var(--text-muted);
+  }
+  .task-center-view[data-mobile-layout="true"] .bt-week-list {
+    flex: 0 0 auto;
+    min-height: 0;
+    padding: 0 6px 6px;
+  }
+  .task-center-view[data-mobile-layout="true"] .bt-week-list:empty {
+    display: none;
   }
   /* Body collapsed by default; today and explicitly-expanded show it. */
   .task-center-view[data-mobile-layout="true"] .bt-week-col:not(.today):not(.expanded) .bt-week-list {
@@ -2194,6 +2221,10 @@
     padding: 2px;
     min-height: 36px;
   }
+  .task-center-view[data-mobile-layout="true"] .bt-month-cell.selected {
+    outline: 2px solid color-mix(in srgb, var(--interactive-accent) 75%, transparent);
+    background: color-mix(in srgb, var(--interactive-accent) 12%, var(--background-secondary));
+  }
   .task-center-view[data-mobile-layout="true"] .bt-month-cell-head {
     flex-direction: column;
     align-items: center;
@@ -2209,6 +2240,45 @@
     font-size: 0;
     line-height: 0;
     overflow: hidden;
+  }
+  .task-center-view[data-mobile-layout="true"] .bt-month-day-panel {
+    margin-top: 10px;
+    padding: 10px;
+    border: 1px solid var(--background-modifier-border);
+    border-radius: 8px;
+    background: var(--background-secondary);
+  }
+  .task-center-view[data-mobile-layout="true"] .bt-month-day-panel-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--background-modifier-border);
+  }
+  .task-center-view[data-mobile-layout="true"] .bt-month-day-panel-title {
+    flex: 1 1 auto;
+    min-width: 0;
+    font-size: 14px;
+    font-weight: 700;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .task-center-view[data-mobile-layout="true"] .bt-month-day-panel-count {
+    flex: 0 0 auto;
+    font-size: 11px;
+    color: var(--text-muted);
+  }
+  .task-center-view[data-mobile-layout="true"] .bt-month-day-panel-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding-top: 8px;
+  }
+  .task-center-view[data-mobile-layout="true"] .bt-month-day-empty {
+    padding: 10px 2px 2px;
+    color: var(--text-faint);
+    font-size: 13px;
   }
 
   /* ───── Mobile Matrix: vertical bucket list (US-103a / UX-mobile §5.4) ───── */
@@ -2436,8 +2506,36 @@
   align-items: center;
   justify-content: space-between;
 }
+.task-center-bottom-sheet .bt-mobile-date-calendar .bt-date-calendar-weekdays,
+.task-center-bottom-sheet .bt-mobile-date-calendar .bt-date-calendar-grid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 4px;
+}
+.task-center-bottom-sheet .bt-mobile-date-calendar .bt-date-calendar-weekday {
+  min-width: 0;
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 600;
+  text-align: center;
+}
 .task-center-bottom-sheet .bt-mobile-date-sheet .bt-date-calendar-day {
+  width: 100%;
+  min-width: 0;
   min-height: 38px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 9px;
+  background: var(--background-secondary);
+  color: var(--text-normal);
+  text-align: center;
+}
+.task-center-bottom-sheet .bt-mobile-date-sheet .bt-date-calendar-day.today {
+  border-color: var(--background-modifier-border);
+}
+.task-center-bottom-sheet .bt-mobile-date-sheet .bt-date-calendar-day.other-month {
+  color: var(--text-faint);
+  background: transparent;
 }
 
 /* Parent picker for mobile nest action (UX-mobile §8.3) */

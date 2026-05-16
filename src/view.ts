@@ -214,6 +214,7 @@ export class TaskCenterView extends ItemView {
       showUnscheduledPool: true,
       collapsedWeeks: new Set(),
       expandedDays: new Set(),
+      selectedMonthDay: null,
     };
   }
 
@@ -2648,6 +2649,20 @@ export class TaskCenterView extends ItemView {
     wrapper.dataset.view = "week";
 
     for (const day of days) {
+      const dayTasks = effectiveTasks
+        .filter((t) => t.effectiveScheduled === day)
+        .filter(filter);
+      // Recompute top-level after query filtering: children whose parent
+      // was filtered out must appear as top-level cards rather than
+      // being hidden behind a parent that isn't in the result.
+      const dayTasksRecomputed = recomputeTopLevelInQuery(dayTasks);
+      dayTasksRecomputed.sort((a, b) => {
+        if (a.effectiveDeadline && b.effectiveDeadline) return a.effectiveDeadline.localeCompare(b.effectiveDeadline);
+        if (a.effectiveDeadline) return -1;
+        if (b.effectiveDeadline) return 1;
+        return 0;
+      });
+      const topLevel = dayTasksRecomputed.filter((t) => t.isTopLevelInQuery);
       // Mobile collapsible per-day rows (UX-mobile §3.1): `today` always
       // shows its body; other days show body only when `expanded` class
       // is present. Desktop CSS overrides and shows body unconditionally,
@@ -2678,22 +2693,7 @@ export class TaskCenterView extends ItemView {
         cls: "bt-week-dow",
       });
       head.createSpan({ text: `${pad(d.getMonth() + 1)}-${pad(d.getDate())}`, cls: "bt-week-date" });
-
-      const dayTasks = effectiveTasks
-        .filter((t) => t.effectiveScheduled === day)
-        .filter(filter);
-      // Recompute top-level after query filtering: children whose parent
-      // was filtered out must appear as top-level cards rather than
-      // being hidden behind a parent that isn't in the result.
-      const dayTasksRecomputed = recomputeTopLevelInQuery(dayTasks);
-      dayTasksRecomputed.sort((a, b) => {
-        if (a.effectiveDeadline && b.effectiveDeadline) return a.effectiveDeadline.localeCompare(b.effectiveDeadline);
-        if (a.effectiveDeadline) return -1;
-        if (b.effectiveDeadline) return 1;
-        return 0;
-      });
-      const topLevel = dayTasksRecomputed.filter((t) => t.isTopLevelInQuery);
-      const stats = col.createSpan({
+      const stats = head.createSpan({
         text: this.columnStats(dayTasksRecomputed),
         cls: "bt-week-stats",
       });
@@ -2828,6 +2828,12 @@ export class TaskCenterView extends ItemView {
     }
 
     const grid = wrapper.createDiv({ cls: "bt-month-grid" });
+    const isMobileLayout = this.contentEl.dataset.mobileLayout === "true";
+    let selectedDay = this.state.selectedMonthDay;
+    if (!selectedDay || (selectedDay < first || selectedDay > last)) {
+      selectedDay = today >= first && today <= last ? today : first;
+    }
+    let selectedDayTasks: EffectiveTask[] = [];
     for (const day of gridDays) {
       const dObj = fromISO(day);
       const isCurMonth = day >= first && day <= last;
@@ -2835,7 +2841,8 @@ export class TaskCenterView extends ItemView {
         cls:
           "bt-month-cell" +
           (day === today ? " today" : "") +
-          (isCurMonth ? "" : " other-month"),
+          (isCurMonth ? "" : " other-month") +
+          (isMobileLayout && day === selectedDay ? " selected" : ""),
       });
       // e2e drop-target selector — same contract as the week view.
       cell.dataset.date = day;
@@ -2846,6 +2853,7 @@ export class TaskCenterView extends ItemView {
       // parent was filtered out become top-level cards in the cell.
       const dayTasksRecomputed = recomputeTopLevelInQuery(dayTasksAll);
       const dayTasks = dayTasksRecomputed.filter((t) => t.isTopLevelInQuery);
+      if (day === selectedDay) selectedDayTasks = dayTasks;
       const head = cell.createDiv({ cls: "bt-month-cell-head" });
       head.createSpan({ text: `${dObj.getDate()}`, cls: "bt-month-cell-date" });
       if (dayTasks.length > 0) {
@@ -2871,24 +2879,48 @@ export class TaskCenterView extends ItemView {
         list.createDiv({ text: `+${dayTasks.length - 6} more`, cls: "bt-mini-more" });
       }
       // US-504: mobile month tab is calendar-grid + per-day dot density;
-      // tapping a day opens that day's task list as a bottom sheet (the
-      // desktop path leaves the click as a no-op — chips inside handle
-      // their own drag / select). Detection is "in mobile layout" — the
-      // same predicate `applyMobileLayoutAttr` uses for the data-attr,
-      // so viewport-narrow OR US-502 mobileForceLayout both qualify.
-      // task #42 fixed the case where force-mobile was on but the
-      // viewport was wide — the click previously silently no-op'd.
+      // tapping a day selects it and refreshes the inline day panel below
+      // the calendar. The desktop path leaves the click as a no-op — chips
+      // inside handle their own drag / select.
       // see USER_STORIES.md
       cell.addEventListener("click", (e) => {
-        const narrow = window.innerWidth < 600;
-        const force = !!this.plugin.settings.mobileForceLayout;
-        if (!narrow && !force) return;
+        if (this.contentEl.dataset.mobileLayout !== "true") return;
         // Don't fire when the click bubbled from a chip — that's a select
         // intent, not "open the day".
         if ((e.target as HTMLElement).closest(".bt-mini-card")) return;
-        this.openDayTasksSheet(day, dayTasks);
+        this.state.selectedMonthDay = day;
+        this.state.selectedTaskId = null;
+        this.render();
       });
     }
+    if (isMobileLayout) {
+      this.renderMobileMonthDayPanel(wrapper, selectedDay, selectedDayTasks);
+    }
+  }
+
+  private renderMobileMonthDayPanel(parent: HTMLElement, day: string, dayTasks: EffectiveTask[]): void {
+    const panel = parent.createDiv({ cls: "bt-month-day-panel" });
+    panel.dataset.date = day;
+
+    const d = fromISO(day);
+    const head = panel.createDiv({ cls: "bt-month-day-panel-head" });
+    head.createSpan({
+      cls: "bt-month-day-panel-title",
+      text: tr("month.daySchedule", {
+        date: `${weekdayLabel(d.getDay())} ${pad(d.getMonth() + 1)}-${pad(d.getDate())}`,
+      }),
+    });
+    head.createSpan({
+      cls: "bt-month-day-panel-count",
+      text: this.columnStats(dayTasks),
+    });
+
+    const list = panel.createDiv({ cls: "bt-month-day-panel-list" });
+    if (dayTasks.length === 0) {
+      list.createDiv({ cls: "bt-month-day-empty", text: tr("sheet.empty") });
+      return;
+    }
+    for (const t of dayTasks) this.renderCard(list, t, day);
   }
 
   /**
@@ -3040,44 +3072,6 @@ export class TaskCenterView extends ItemView {
           if (parentId !== null) await this.api.nest(t.id, parentId);
         });
         secondaryAction("source", tr("sheet.editSource"), () => this.openSourceEditShell(t));
-      },
-    });
-    sheet.open();
-  }
-
-  /**
-   * Mobile-only: bottom sheet listing every todo task scheduled to `day`.
-   * Tapping a row switches to the week tab anchored on that day with the
-   * row's day expanded (so the user can act on the task with the full
-   * card UI rather than re-implementing card actions inside the sheet).
-   */
-  private openDayTasksSheet(day: string, dayTasks: ParsedTask[]): void {
-    const sheet = new BottomSheet(this.app, {
-      title: day,
-      populate: (el) => {
-        if (dayTasks.length === 0) {
-          el.createDiv({ cls: "bt-sheet-empty", text: tr("sheet.empty") });
-          return;
-        }
-        for (const t of dayTasks) {
-          const row = el.createDiv({ cls: "bt-sheet-task" });
-          row.dataset.taskId = t.id;
-          row.createSpan({ cls: "bt-sheet-task-title", text: t.title });
-          if (t.deadline) {
-            row.createSpan({
-              cls: "bt-sheet-task-meta",
-              text: `📅 ${t.deadline}`,
-            });
-          }
-          row.addEventListener("click", () => {
-            this.state.tab = "week";
-            this.state.anchorISO = day;
-            this.state.expandedDays.add(day);
-            this.state.selectedTaskId = t.id;
-            sheet.close();
-            this.render();
-          });
-        }
       },
     });
     sheet.open();

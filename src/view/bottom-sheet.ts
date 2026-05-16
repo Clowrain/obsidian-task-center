@@ -1,10 +1,8 @@
 // Mobile bottom-sheet primitive.
 //
-// UX-mobile.md §3.2 needs a "tap a month cell → list of tasks for that day"
-// surface, and §5.1 needs a "long-press → context menu + source info" sheet.
-// Both are visually the same primitive: a full-width panel anchored to the
-// bottom of the viewport with a close gesture. This module provides the
-// shell; consumers fill the body via the `populate()` callback.
+// UX-mobile.md uses bottom sheets for long-press actions, task details,
+// Quick Add, and tap-only date picking. Month day selection is rendered
+// inline in the view, not with this primitive.
 //
 // Implementation notes:
 //   - Uses Obsidian's `Modal` for backdrop / open / close lifecycle, then

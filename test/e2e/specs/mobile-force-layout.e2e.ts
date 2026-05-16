@@ -1,4 +1,4 @@
-import { browser, expect, $ } from "@wdio/globals";
+import { browser, expect } from "@wdio/globals";
 import { obsidianPage } from "wdio-obsidian-service";
 
 const VAULT = "test/e2e/vaults/simple";
@@ -59,7 +59,7 @@ async function setMobileForceLayout(value: boolean): Promise<void> {
 /**
  * task #42 (US-502 / US-504): when the user has flipped
  * `mobileForceLayout` on (e.g. iPad / split-screen escape hatch), the
- * Month tab's tap-day-to-open-bottom-sheet behavior MUST follow that
+ * Month tab's tap-day-to-show-inline-schedule behavior MUST follow that
  * setting — the previous code only consulted `window.innerWidth < 600`,
  * so on a wide screen the click silently no-op'd and the user could
  * never reach the day's task list. Mobile layout is mode, viewport is
@@ -70,7 +70,7 @@ describe("Task Center — mobileForceLayout (task #42)", function () {
     await obsidianPage.resetVault(VAULT);
   });
 
-  it("task #42: wide-screen Month cell tap opens bottom sheet when mobileForceLayout=true", async function () {
+  it("task #42: wide-screen Month cell tap updates inline day schedule when mobileForceLayout=true", async function () {
     const today = todayISO();
     await writeAndWait("Tasks/Inbox.md", `- [ ] Smoke task ⏳ ${today}\n`);
 
@@ -106,14 +106,33 @@ describe("Task Center — mobileForceLayout (task #42)", function () {
       cell?.click();
     }, today);
 
-    // The bottom sheet uses the `task-center-bottom-sheet` modal class.
-    // It must appear. On the buggy code path the click no-ops on a wide
-    // viewport regardless of `mobileForceLayout`, so the sheet stays
-    // closed and this assertion times out.
-    await $(".task-center-bottom-sheet").waitForExist({
-      timeout: 3000,
-      timeoutMsg:
-        "task #42 still red — Month cell tap did not open bottom sheet despite mobileForceLayout=true",
-    });
+    await browser.waitUntil(
+      () =>
+        browser.execute(
+          (iso: string) =>
+            !!document.querySelector(
+              `.task-center-view .bt-month-day-panel[data-date="${iso}"] [data-task-id="Tasks/Inbox.md:L1"]`,
+            ),
+          today,
+        ),
+      {
+        timeout: 3000,
+        timeoutMsg:
+          "task #42 still red — Month cell tap did not update inline schedule despite mobileForceLayout=true",
+      },
+    );
+    const rendered = await browser.execute((iso: string) => {
+      const panel = document.querySelector<HTMLElement>(
+        `.task-center-view .bt-month-day-panel[data-date="${iso}"]`,
+      );
+      return {
+        hasPanel: !!panel,
+        hasTask: !!panel?.querySelector('[data-task-id="Tasks/Inbox.md:L1"]'),
+        hasModal: !!document.querySelector(".task-center-bottom-sheet"),
+      };
+    }, today);
+    expect(rendered.hasPanel).toBe(true);
+    expect(rendered.hasTask).toBe(true);
+    expect(rendered.hasModal).toBe(false);
   });
 });

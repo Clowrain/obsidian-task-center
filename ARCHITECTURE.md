@@ -403,8 +403,8 @@ type ViewModel =
 ```
 
 - List：按 sections 分组；无 sections 时使用一个默认 section。
-- Week：按有效 `scheduled` 落入 7 天；无有效 scheduled 不进日期区，可进入 tray。
-- Month：按有效 `scheduled` 落入月历日期格；移动端只改变渲染密度。
+- Week：按有效 `scheduled` 落入 7 天；无有效 scheduled 不进日期区，可进入 tray。移动端折叠状态只影响 day row body 可见性，不改变 day model。
+- Month：按有效 `scheduled` 落入月历日期格；移动端只改变渲染密度，并把当前选中日期的任务列表作为月历下方内联 panel 渲染。
 - Matrix：按用户配置 bucket 条件匹配；未命中进入 unmatched。
 
 ### 4.4 Summary
@@ -542,7 +542,7 @@ Undo 栈：
 - 调用 `api.evaluateQuery(tabId)` 得到 view model + summary。
 - 渲染 Header、Tab Strip、Toolbar、Summary、View Body。
 - 路由卡片 click、context menu、drag、mobile actions。
-- 维护 per-tab view cursor：weekStart、month、scroll、expanded。
+- 维护 per-tab view cursor：weekStart、month、scroll、expanded、mobile selected month day。
 - 暴露测试属性 `data-test-cache-version`。
 
 不允许 View 直接解析 vault 或手写 writer mutation。
@@ -810,7 +810,7 @@ E2E 覆盖 UX 主路径：
 - 源 Markdown 编辑层定位、编辑、保存、刷新。
 - Quick Add 成功 / Daily Notes 失败保留输入。
 - 桌面拖拽改期、放弃、嵌套、非法目标、跨 tab dwell、undo。
-- 移动端 week row、month bottom sheet、swipe、任务详情 sheet、长按 action sheet、点选式日期 sheet。
+- 移动端 week row、month inline day panel、swipe、任务详情 sheet、长按 action sheet、点选式日期 sheet。
 - CLI task 与 query 动词。
 - i18n 热切换。
 

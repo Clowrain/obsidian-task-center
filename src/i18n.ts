@@ -69,9 +69,10 @@ const EN = {
   "dnd.droppedUndo": "dropped",
 
   // US-504: mobile month tab uses calendar-grid + dot density + tap-day
-  // bottom sheet listing the day's tasks. This empty-state string powers
-  // the sheet body when a day has no scheduled tasks.
+  // inline day panel listing the day's tasks. This empty-state string powers
+  // the panel body when a day has no scheduled tasks.
   // see USER_STORIES.md
+  "month.daySchedule": "{date} schedule",
   "sheet.empty": "No tasks scheduled this day.",
 
   // Completed
@@ -427,6 +428,7 @@ const ZH: Partial<typeof EN> = {
     "排期继承自父任务，请编辑源 Markdown 或将任务移出父级。",
   "dnd.droppedUndo": "放弃",
 
+  "month.daySchedule": "{date} 排期",
   "sheet.empty": "这一天没有任务。",
 
   "completed.weekOf": "{date} 那一周",

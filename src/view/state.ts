@@ -15,4 +15,5 @@ export interface ViewState {
   showUnscheduledPool: boolean;
   collapsedWeeks: Set<string>;
   expandedDays: Set<string>;
+  selectedMonthDay: string | null;
 }

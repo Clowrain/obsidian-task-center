@@ -6,7 +6,7 @@ import { obsidianPage } from "wdio-obsidian-service";
  *
  * Six mobile-only surfaces reviewer's QA pass called out:
  *   ✅ Week 折叠/展开 (US-503)
- *   ✅ Month bottom sheet (US-504, also covered in mobile-force-layout.e2e.ts)
+ *   ✅ Month inline day schedule (US-504, also covered in mobile-force-layout.e2e.ts)
  *   ✅ Quick Add bottom-sheet styling (US-509)
  *   ✅ 长按 → action sheet (US-506)
  *   ✅ 滑动 done (US-508 left)
@@ -170,7 +170,7 @@ describe("Task Center — mobile coverage gap-fill (task #44)", function () {
         `.task-center-view [data-date="${iso}"]`,
       );
       if (!day) return false;
-      const head = day.querySelector<HTMLElement>(".bt-week-day-head") ?? day;
+      const head = day.querySelector<HTMLElement>(".bt-week-head") ?? day;
       head.click();
       return true;
     }, targetDay);
@@ -183,29 +183,35 @@ describe("Task Center — mobile coverage gap-fill (task #44)", function () {
     });
   });
 
-  // US-503: mobile week 主体同样不能只露出一条很矮的列表。
-  it("US-503: mobile Week keeps at least half of the Task Center visible height", async function () {
+  // US-503: mobile week 的折叠/展开不能制造空白大块；统计数字也必须留在 header。
+  it("US-503: mobile Week keeps stats in the row header and empty expanded rows compact", async function () {
     const today = todayISO();
     await writeAndWait("Tasks/Inbox.md", `- [ ] Mobile week min-height task ⏳ ${today}\n`);
     await openMobileBoardWeek();
 
     await $(".task-center-view .bt-week").waitForExist({ timeout: 5000 });
     const metrics = await browser.execute(() => {
-      const view = document.querySelector<HTMLElement>(".task-center-view")!;
-      const week = document.querySelector<HTMLElement>(".task-center-view .bt-week")!;
+      const todayRow = document.querySelector<HTMLElement>(`.task-center-view [data-date="${today}"]`)!;
+      const head = todayRow.querySelector<HTMLElement>(".bt-week-head")!;
+      const stats = todayRow.querySelector<HTMLElement>(".bt-week-stats")!;
+      const emptyRow = Array.from(document.querySelectorAll<HTMLElement>(".task-center-view .bt-week-col"))
+        .find((row) => row.dataset.date !== today && !row.querySelector(".bt-card"))!;
+      const emptyHead = emptyRow.querySelector<HTMLElement>(".bt-week-head")!;
       return {
-        viewHeight: view.getBoundingClientRect().height,
-        weekHeight: week.getBoundingClientRect().height,
+        statsParentIsHead: stats.parentElement === head,
+        emptyRowHeight: emptyRow.getBoundingClientRect().height,
+        emptyHeadHeight: emptyHead.getBoundingClientRect().height,
       };
     });
 
-    expect(metrics.weekHeight).toBeGreaterThanOrEqual(Math.floor(metrics.viewHeight / 2));
+    expect(metrics.statsParentIsHead).toBe(true);
+    expect(metrics.emptyRowHeight).toBeLessThanOrEqual(metrics.emptyHeadHeight + 4);
   });
 
-  // US-504: Month bottom-sheet tap-to-open day-tasks list — already
+  // US-504: Month tap-to-select inline day schedule — already
   // automated in mobile-force-layout.e2e.ts (task #42 fix). Marker test
   // makes the coverage map grep-able from this file.
-  it("US-504: Month bottom-sheet covered by mobile-force-layout.e2e.ts (task #42 fix)", function () {
+  it("US-504: Month inline day panel covered by mobile-force-layout.e2e.ts (task #42 fix)", function () {
     expect(true).toBe(true);
   });
 
@@ -263,6 +269,20 @@ describe("Task Center — mobile coverage gap-fill (task #44)", function () {
       timeoutMsg: "US-507a: schedule did not open tap-only date sheet",
     });
     await expect($(".task-center-bottom-sheet .bt-mobile-date-sheet input")).not.toExist();
+    const dateSheetMetrics = await browser.execute(() => {
+      const sheet = document.querySelector<HTMLElement>(".task-center-bottom-sheet .bt-mobile-date-sheet")!;
+      const grid = sheet.querySelector<HTMLElement>(".bt-date-calendar-grid")!;
+      const sheetRect = sheet.getBoundingClientRect();
+      const gridRect = grid.getBoundingClientRect();
+      return {
+        gridDisplay: getComputedStyle(grid).display,
+        gridColumns: getComputedStyle(grid).gridTemplateColumns.split(" ").filter(Boolean).length,
+        gridFitsSheet: gridRect.left >= sheetRect.left && gridRect.right <= sheetRect.right + 1,
+      };
+    });
+    expect(dateSheetMetrics.gridDisplay).toBe("grid");
+    expect(dateSheetMetrics.gridColumns).toBe(7);
+    expect(dateSheetMetrics.gridFitsSheet).toBe(true);
     await $(`.task-center-bottom-sheet [data-date-choice="${target}"]`).click();
 
     await browser.waitUntil(
