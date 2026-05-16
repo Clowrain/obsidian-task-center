@@ -684,16 +684,20 @@ export class TaskCenterView extends ItemView {
   private renderTabBar(parent: HTMLElement) {
     const bar = parent.createDiv({ cls: "bt-tabbar" });
     const tabs = this.visibleQueryTabs();
+    const mobileLayout = this.contentEl.dataset.mobileLayout === "true";
     // VAL-GUI-005: when there are more than MAX_VISIBLE_TABS, overflow
     // tabs go into a "更多" button. Overflow tabs retain order, badges,
     // default behavior, and keyboard shortcuts.
     // Keyboard shortcuts ⌃1–⌃9 map to the first 9 visible tabs.
+    //
+    // US-117b / US-510: mobile may pan the tab strip horizontally, but it
+    // must not expose desktop shortcut affordances.
     const MAX_VISIBLE_TABS = 9;
     const visibleTabs = tabs.slice(0, MAX_VISIBLE_TABS);
     const overflowTabs = tabs.slice(MAX_VISIBLE_TABS);
 
     for (const [index, view] of visibleTabs.entries()) {
-      this.renderTabButton(bar, view, index);
+      this.renderTabButton(bar, view, index, mobileLayout);
     }
 
     // Overflow "更多" button — first-class tab metadata
@@ -728,7 +732,7 @@ export class TaskCenterView extends ItemView {
     }
   }
 
-  private renderTabButton(bar: HTMLElement, view: QueryPreset, index: number): void {
+  private renderTabButton(bar: HTMLElement, view: QueryPreset, index: number, mobileLayout: boolean): void {
     const active = view.id === this.state.savedViewId;
     const dirty = this.isSavedViewDirty(view);
     const badges = this.savedViewBadges(view);
@@ -740,7 +744,7 @@ export class TaskCenterView extends ItemView {
     if (dirty) btn.dataset.queryTabDirty = "true";
     if (this.plugin.settings.defaultSavedViewId === view.id) btn.dataset.queryTabDefault = "true";
     btn.title = badges.length > 0 ? `${view.name} · ${badges.join(" · ")}` : view.name;
-    btn.draggable = true;
+    if (!mobileLayout) btn.draggable = true;
     const label = btn.createDiv({ cls: "bt-tab-label" });
     label.createSpan({ text: view.name, cls: "bt-tab-name" });
     if (dirty) {
@@ -750,7 +754,7 @@ export class TaskCenterView extends ItemView {
     if (count > 0) {
       btn.createSpan({ text: String(count), cls: "bt-tab-count" });
     }
-    if (index < 9) {
+    if (!mobileLayout && index < 9) {
       btn.createSpan({ text: `⌃${index + 1}`, cls: "bt-hotkey" });
     }
     btn.addEventListener("click", () => this.activateSavedView(view));
@@ -772,7 +776,11 @@ export class TaskCenterView extends ItemView {
         moveThresholdPx: 4,
         onTrigger: () => this.openTabManagementSheet(view),
       });
-    }    // ── Tab drag-to-reorder ──
+    }
+
+    if (mobileLayout) return;
+
+    // ── Tab drag-to-reorder ──
     btn.addEventListener("dragstart", (e) => {
       if (!e.dataTransfer) return;
       e.dataTransfer.effectAllowed = "move";

@@ -359,6 +359,7 @@ estimate/actual/deadline 等 meta
 - 桌面编辑层内提供“在原文中打开/定位”入口，但这不是桌面默认路径。（US-168h）
 - 移动端从任务详情 / 操作 sheet 的“编辑原文”进入 Obsidian 原生 Markdown 编辑器，不在 Task Center 内展示整篇 Markdown 浮层；进入后应定位到任务行，由 Obsidian 原生编辑器处理键盘、安全区和滚动。（US-168g / US-506）
 - 移动端首屏 toolbar 不展示搜索框或桌面筛选控件；这些控件统一进入“编辑 Query”bottom sheet。toolbar 自身不得横向滚动或裁切按钮文案，view body 和卡片应贴合可用宽度。（US-117 / US-117a）
+- 移动端 Query Tab 条可以左右滑动浏览 tab；它必须固定高度并隐藏纵向 overflow，不得出现 tab 自身上下滚动。移动端 tab 不显示快捷键提示，不提供拖拽排序 / dwell。（US-117b / US-501 / US-510）
 
 视觉验收必须证明它不是整屏 textarea / preview markdown 的开发者工具感，而是可用的 Obsidian-style 编辑体验。（US-168f）
 
@@ -482,6 +483,8 @@ Month：每个日期格都是改期目标。（US-122）
 移动端 breakpoint：屏幕 `< 600px` 走移动布局；`≥ 600px` 走桌面布局；用户可强制保持移动布局。触控目标高度不低于 44px。（US-502）
 
 移动端不支持 CLI、键盘快捷键、拖拽、dwell、hover；不可用功能不露出。（US-501）
+
+移动端 Query Tab 条支持横向 pan 浏览较多 tab；纵向滚动属于页面内容，不属于 tab 条自身。（US-117b）
 
 等价路径：
 

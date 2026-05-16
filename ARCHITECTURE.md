@@ -757,6 +757,7 @@ function shouldSubmitEnter(e: KeyboardEvent): boolean {
 - 移动端卡片设置 `touch-action: pan-y`。
 - 移动端首屏不挂载桌面搜索输入和筛选控件；Query 编辑 bottom sheet 复用同一套 filter controls，避免双份状态。
 - 移动端 toolbar、body、week row、card 的布局必须基于父容器宽度收缩，不依赖横向滚动承载主路径控件。
+- 移动端 Query tab strip 是例外的横向 pan 区：设置横向 overflow、固定高度、隐藏纵向 overflow，并禁用 tab 拖拽 / dwell / 快捷键提示。
 - 列表容器设置 `overscroll-behavior: contain`。
 - CSS 禁止 `transition: all`。
 - reduced motion 下动画时长 ≤ 50ms 但保留状态变化。

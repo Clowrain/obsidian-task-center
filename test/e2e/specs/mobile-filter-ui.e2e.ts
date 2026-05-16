@@ -126,6 +126,34 @@ describe("Task Center — mobile filter UI (task #88)", function () {
     });
     expect(widthOk).toBe(true);
 
+    const tabbarShape = await browser.execute(() => {
+      const tabbar = document.querySelector<HTMLElement>(".task-center-view .bt-tabbar");
+      const tabs = Array.from(document.querySelectorAll<HTMLElement>(".task-center-view .bt-tabbar .bt-tab"));
+      const oldWidth = tabbar?.style.width ?? "";
+      if (tabbar) tabbar.style.width = "320px";
+      const style = tabbar ? getComputedStyle(tabbar) : null;
+      const shape = {
+        tabCount: tabs.length,
+        hasMore: tabs.some((tab) => tab.dataset.queryTabId === "__overflow__"),
+        hotkeyCount: document.querySelectorAll(".task-center-view .bt-tabbar .bt-hotkey").length,
+        draggableCount: tabs.filter((tab) => tab.getAttribute("draggable") === "true").length,
+        overflowX: style?.overflowX ?? "",
+        overflowY: style?.overflowY ?? "",
+        canHorizontalScroll: tabbar ? tabbar.scrollWidth > Math.ceil(tabbar.clientWidth) + 1 : false,
+        hasVerticalScroll: tabbar ? tabbar.scrollHeight > Math.ceil(tabbar.clientHeight) + 1 : true,
+      };
+      if (tabbar) tabbar.style.width = oldWidth;
+      return shape;
+    });
+    expect(tabbarShape.tabCount).toBeGreaterThan(4);
+    expect(tabbarShape.hasMore).toBe(false);
+    expect(tabbarShape.hotkeyCount).toBe(0);
+    expect(tabbarShape.draggableCount).toBe(0);
+    expect(tabbarShape.overflowX).toBe("auto");
+    expect(tabbarShape.overflowY).toBe("hidden");
+    expect(tabbarShape.canHorizontalScroll).toBe(true);
+    expect(tabbarShape.hasVerticalScroll).toBe(false);
+
     const safeAreaOk = await browser.execute(() => {
       const bar = document.querySelector<HTMLElement>(".bt-mobile-action-bar");
       if (!bar) return false;

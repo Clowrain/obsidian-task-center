@@ -2032,16 +2032,39 @@
     flex: 1 1 0;
   }
 
-  /* Tab bar: 4 tabs + counts won't fit on a 360px phone — horizontal scroll
-     instead of wrapping (UX-mobile §2 / §12, PM follow-up). Momentum
-     scroll for iOS. */
+  /* Tab bar: mobile may pan horizontally across query tabs, but the strip
+     itself is never a vertical scroll surface. */
   .task-center-view[data-mobile-layout="true"] .bt-tabbar {
     overflow-x: auto;
+    overflow-y: hidden;
     flex-wrap: nowrap;
+    height: 40px;
+    max-height: 40px;
+    align-items: stretch;
     -webkit-overflow-scrolling: touch;
+    overscroll-behavior-y: contain;
+    touch-action: pan-x;
+    scrollbar-width: none;
+  }
+  .task-center-view[data-mobile-layout="true"] .bt-tabbar::-webkit-scrollbar {
+    display: none;
   }
   .task-center-view[data-mobile-layout="true"] .bt-tab {
-    flex-shrink: 0;
+    flex: 0 0 auto;
+    justify-content: center;
+    min-width: 0;
+    max-width: 132px;
+    padding: 7px 6px;
+    gap: 6px;
+  }
+  .task-center-view[data-mobile-layout="true"] .bt-tab-label,
+  .task-center-view[data-mobile-layout="true"] .bt-tab-name {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .task-center-view[data-mobile-layout="true"] .bt-hotkey {
+    display: none;
   }
 
   /* ───── Card compact mode (US-505 / UX-mobile §4) ───── */

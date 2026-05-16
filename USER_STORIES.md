@@ -318,6 +318,8 @@ tag:#alpha,#beta · 排期:本周 · 状态:TODO · view:周
 
 `US-117a` 移动端主界面不能出现横向溢出的桌面工具栏。搜索框、标签、排期、状态等密集控件必须收进“编辑 Query”bottom sheet；首屏 toolbar 只保留日期导航、编辑 Query 入口和必要的设置入口。周/月/list 内容区与卡片应占满可用宽度，不能因为 toolbar 横向滚动而让右侧内容被裁切。
 
+`US-117b` 移动端 Query Tab 条可以左右滑动浏览 tab，但它不是纵向滚动区域。tab 条必须固定高度、隐藏纵向 overflow；在 tab 条上竖向滑动不能让 tab 自己上下滚动。移动端 tab 不显示桌面快捷键提示，也不提供拖拽排序 / dwell。
+
 ## 8. View 故事
 
 ### 8.1 List View
