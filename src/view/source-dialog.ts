@@ -102,6 +102,8 @@ export async function openTaskSourceEditShell(
     text: `${task.path}:L${task.line + 1}`,
   });
   const actions = header.createDiv({ cls: "task-center-source-edit-actions" });
+  const openInNewTab = actions.createEl("button", { text: tr("sourceEdit.openInNewTab") });
+  openInNewTab.dataset.sourceEditAction = "open-new-tab";
   const close = actions.createEl("button", { text: tr("sourceEdit.close") });
   close.dataset.sourceEditAction = "close";
 
@@ -173,6 +175,34 @@ export async function openTaskSourceEditShell(
   };
   overlay.__sourceEditClose = destroy;
 
+  const openNativeSourceTab = async () => {
+    activeDocument.removeEventListener("keydown", onKeydown, true);
+    activeDocument.removeEventListener("keyup", onKeyup, true);
+    window.removeEventListener("keydown", onKeydown, true);
+    window.removeEventListener("keyup", onKeyup, true);
+    try {
+      await (view as unknown as { save?: () => Promise<void> })?.save?.();
+    } catch {
+      // Opening the native tab should still proceed if the embedded editor is
+      // already clean or Obsidian's requestSave pipeline handled persistence.
+    }
+    try {
+      leaf?.detach();
+    } catch {
+      leaf?.parentSplit?.removeChild?.(leaf);
+    }
+    overlay.remove();
+    await opts.onSave?.();
+
+    const nativeLeaf = app.workspace.getLeaf("tab");
+    await nativeLeaf.openFile(file, {
+      active: true,
+      eState: { line: task.line },
+    });
+    app.workspace.setActiveLeaf(nativeLeaf, { focus: true });
+    await focusTaskLineInMarkdownView(nativeLeaf, task.line);
+  };
+
   const onKeydown = (e: KeyboardEvent) => {
     if (!consumeEscape(e)) return;
     if (closing) return;
@@ -190,6 +220,14 @@ export async function openTaskSourceEditShell(
   activeDocument.addEventListener("keyup", onKeyup, true);
   window.addEventListener("keydown", onKeydown, true);
   window.addEventListener("keyup", onKeyup, true);
+  openInNewTab.addEventListener("click", () => {
+    if (closing) return;
+    closing = true;
+    void openNativeSourceTab().catch((err) => {
+      new Notice(tr("sourceEdit.nativeFailed"));
+      console.error(err);
+    });
+  });
   close.addEventListener("click", () => void destroy());
   overlay.addEventListener("click", () => void destroy());
 

@@ -264,6 +264,43 @@ describe("US-168 source edit panel replaces old source-preview paths", function 
     await expect($(".workspace-leaf.mod-active .task-center-view")).toExist();
   });
 
+  it("US-168h: source shell can open the task in a new Obsidian Markdown tab", async function () {
+    const { card } = await openBoardWithTask();
+
+    await card.click();
+    const shell = $("[data-source-edit-shell]");
+    await shell.waitForExist({ timeout: 5000 });
+
+    const actionOrder = (await browser.execute(() => {
+      return Array.from(document.querySelectorAll<HTMLElement>("[data-source-edit-action]")).map(
+        (el) => el.dataset.sourceEditAction,
+      );
+    })) as Array<string | undefined>;
+    expect(actionOrder).toEqual(["open-new-tab", "close"]);
+
+    await $("[data-source-edit-action='open-new-tab']").click();
+    await shell.waitForExist({ timeout: 5000, reverse: true });
+
+    await browser.waitUntil(
+      async () => {
+        const active = await activeLeafSnapshot();
+        return active.type === "markdown" && active.path === "Tasks/Inbox.md";
+      },
+      {
+        timeout: 5000,
+        timeoutMsg: "Open (new tab) did not activate the source Markdown file",
+      },
+    );
+
+    const cursor = (await browser.executeObsidian(async ({ app }) => {
+      const view = app.workspace.activeLeaf?.view as unknown as {
+        editor?: { getCursor?: () => { line: number; ch: number } };
+      };
+      return view.editor?.getCursor?.() ?? null;
+    })) as { line: number; ch: number } | null;
+    expect(cursor?.line).toBe(1);
+  });
+
   it("US-168d: hover popover and context-menu open-source entry are removed", async function () {
     const { card } = await openBoardWithTask();
 

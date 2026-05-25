@@ -395,6 +395,7 @@ const EN = {
 
   // US-168: in-place source Markdown edit overlay.
   "sourceEdit.title": "Edit in Obsidian",
+  "sourceEdit.openInNewTab": "Open (new tab)",
   "sourceEdit.save": "Save",
   "sourceEdit.close": "Close",
   "sourceEdit.saved": "Saved",
@@ -740,6 +741,7 @@ const ZH: Partial<typeof EN> = {
   "savedViews.summaryLimit": "数量上限",
 
   "sourceEdit.title": "在 Obsidian 中编辑",
+  "sourceEdit.openInNewTab": "打开（新标签页）",
   "sourceEdit.save": "保存",
   "sourceEdit.close": "关闭",
   "sourceEdit.saved": "已保存",

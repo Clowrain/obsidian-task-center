@@ -613,7 +613,7 @@ tag:#alpha,#beta · 排期:本周 · 状态:TODO · view:周
 
 `US-168g` 移动端不在 Task Center 内嵌完整 Markdown 编辑浮层，不用 textarea 或自制 preview 冒充编辑器；必须调用 Obsidian 官方 workspace / MarkdownView 编辑能力打开源文件、定位任务行，并交给 Obsidian 原生编辑器处理键盘、安全区和滚动。
 
-`US-168h` 桌面编辑层内提供“在原文中打开/定位”入口。它是用户主动选择，不能取代桌面默认当前页编辑层；移动端该入口本身就是原生打开原文。
+`US-168h` 桌面编辑层内提供“打开（新标签页）”入口，用 Obsidian 原生 Markdown 标签页打开并定位到同一任务行。它是用户主动选择，不能取代桌面默认当前页编辑层；移动端该入口本身就是原生打开原文。
 
 `US-161` 标题改名不再走卡片 inline input。用户在源 Markdown 编辑层改原文。
 

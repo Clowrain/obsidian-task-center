@@ -356,7 +356,7 @@ estimate/actual/deadline 等 meta
 - 保存后文件落盘，看板刷新。（US-168b）
 - 单击卡片不能只选中；选中态只能作为视觉反馈。（US-168c）
 - 桌面端 Esc、右上关闭、点击遮罩都关闭编辑层并回到原状态。（US-168e）
-- 桌面编辑层内提供“在原文中打开/定位”入口，但这不是桌面默认路径。（US-168h）
+- 桌面编辑层内在“关闭”左侧提供“打开（新标签页）”入口，点击后关闭当前编辑层，在 Obsidian 原生 Markdown 新标签页中打开并定位到同一任务行；这不是桌面默认路径。（US-168h）
 - 移动端从任务详情 / 操作 sheet 的“编辑原文”进入 Obsidian 原生 Markdown 编辑器，不在 Task Center 内展示整篇 Markdown 浮层；进入后应定位到任务行，由 Obsidian 原生编辑器处理键盘、安全区和滚动。（US-168g / US-506）
 - 移动端首屏 toolbar 不展示搜索框或桌面筛选控件；这些控件统一进入“编辑 Query”bottom sheet。toolbar 自身不得横向滚动或裁切按钮文案，view body 和卡片应贴合可用宽度。（US-117 / US-117a）
 - 移动端 Query Tab 条可以左右滑动浏览 tab；它必须固定高度并隐藏纵向 overflow，不得出现 tab 自身上下滚动。移动端 tab 不显示快捷键提示，不提供拖拽排序 / dwell。（US-117b / US-501 / US-510）
