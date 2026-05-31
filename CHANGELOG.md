@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Bugfix: prepare 0.8.19 with a cache refresh fix for tasks added in Obsidian after Task Center is already open.
 - Release: prepare 0.8.18 with community-plugin audit cleanup for clipboard, browser storage, vault enumeration, CSS compatibility, and dev dependency advisories.
 - Mobile: redesign “Set as subtask” as a contextual parent picker with grouped candidates, disabled invalid rows, explicit confirmation, and undoable nest writes.
 - Mobile: remove the desktop search box from the phone toolbar, keep Query controls in the bottom sheet, and prevent toolbar overflow from clipping the week view.
