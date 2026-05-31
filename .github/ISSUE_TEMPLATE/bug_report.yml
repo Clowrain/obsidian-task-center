@@ -1,0 +1,110 @@
+name: Bug report
+description: Report broken or unexpected behavior.
+title: "[Bug]: "
+labels: ["bug", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report a bug.
+
+        A clear report should explain what happened, what you expected, and how to reproduce it. If the issue involves task syntax, please include a minimal Markdown snippet.
+
+  - type: checkboxes
+    id: existing-issue
+    attributes:
+      label: Is there an existing issue for this?
+      description: Please search the existing issues before opening a new one.
+      options:
+        - label: I have searched the existing issues.
+          required: true
+
+  - type: textarea
+    id: actual-behavior
+    attributes:
+      label: Current behavior
+      description: Describe what Task Center does now.
+      placeholder: Describe the visible result, error, or incorrect output.
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected-behavior
+    attributes:
+      label: Expected behavior
+      description: Describe what you expected to happen instead.
+      placeholder: Describe the result you expected.
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps-to-reproduce
+    attributes:
+      label: Steps to reproduce
+      description: List the smallest set of steps that triggers the issue.
+      placeholder: |
+        1. ...
+        2. ...
+        3. ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: minimal-markdown
+    attributes:
+      label: Minimal Markdown example
+      description: If this involves task parsing or write-back, paste the smallest note or task snippet that reproduces it.
+      render: markdown
+      placeholder: Paste the smallest Markdown snippet here.
+    validations:
+      required: false
+
+  - type: dropdown
+    id: affected-area
+    attributes:
+      label: Which area is affected?
+      multiple: true
+      options:
+        - Task parsing
+        - Task rendering
+        - Editing / writing back to Markdown
+        - Query tabs
+        - Week / month scheduling
+        - Mobile gestures
+        - CLI / agent integration
+        - Documentation
+        - Not sure
+    validations:
+      required: true
+
+  - type: input
+    id: obsidian-version
+    attributes:
+      label: Obsidian version
+      placeholder: Version number
+    validations:
+      required: false
+
+  - type: input
+    id: plugin-version
+    attributes:
+      label: Task Center version or commit
+      placeholder: Release version or commit SHA
+    validations:
+      required: false
+
+  - type: input
+    id: platform
+    attributes:
+      label: Platform
+      placeholder: Operating system and device, such as macOS desktop or Android phone.
+    validations:
+      required: false
+
+  - type: textarea
+    id: logs-and-media
+    attributes:
+      label: Screenshots, logs, or extra context
+      description: Add screenshots, screen recordings, console errors, related plugins, or links if they help explain the issue.
+    validations:
+      required: false

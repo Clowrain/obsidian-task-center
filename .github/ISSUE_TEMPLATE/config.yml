@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Product requirements
+    url: https://github.com/CorrectRoadH/obsidian-task-center/blob/main/USER_STORIES.md
+    about: Read the current user stories before proposing larger behavior changes.
+  - name: UX specification
+    url: https://github.com/CorrectRoadH/obsidian-task-center/blob/main/UX.md
+    about: Check the documented interaction model and UI states.

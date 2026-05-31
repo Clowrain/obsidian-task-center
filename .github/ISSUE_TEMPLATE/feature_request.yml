@@ -1,0 +1,95 @@
+name: Feature request
+description: Suggest a user-facing improvement.
+title: "[Feature]: "
+labels: ["enhancement", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for suggesting an improvement.
+
+        Task Center tracks feature work through user stories first. Please focus on the user, the situation, the expected outcome, and the boundaries of the request.
+
+  - type: checkboxes
+    id: existing-issue
+    attributes:
+      label: Is there an existing issue for this?
+      description: Please search the existing issues before opening a new one.
+      options:
+        - label: I have searched the existing issues.
+          required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem or use case
+      description: What are you trying to accomplish, and what is difficult today?
+      placeholder: Describe the user situation and why it matters.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposed-behavior
+    attributes:
+      label: Proposed behavior
+      description: Describe the successful result from the user's point of view.
+      placeholder: Describe what Task Center should allow the user to do.
+    validations:
+      required: true
+
+  - type: textarea
+    id: current-workaround
+    attributes:
+      label: Current workaround
+      description: How do you handle this today, if at all?
+      placeholder: Describe any manual steps, plugins, or workflow you use today.
+    validations:
+      required: false
+
+  - type: textarea
+    id: examples-or-references
+    attributes:
+      label: Examples or references
+      description: Include example Markdown, screenshots, links, or workflows if they help explain the request.
+      render: markdown
+      placeholder: Add examples or references here.
+    validations:
+      required: false
+
+  - type: textarea
+    id: non-goals
+    attributes:
+      label: Boundaries and non-goals
+      description: What should this request not include?
+      placeholder: Describe what should stay out of scope.
+    validations:
+      required: false
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Which area would this change?
+      multiple: true
+      options:
+        - Task syntax compatibility
+        - Query tabs
+        - Query editor
+        - List view
+        - Week view
+        - Month view
+        - Matrix view
+        - Quick Add
+        - Mobile gestures
+        - CLI / agent integration
+        - Documentation
+        - Not sure
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: source-of-truth
+    attributes:
+      label: Product alignment
+      options:
+        - label: I understand Task Center keeps Markdown tasks as the source of truth.
+          required: true
