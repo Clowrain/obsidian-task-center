@@ -77,6 +77,9 @@ export interface TaskCenterSettings {
   openOnStartup: boolean;
   weekStartsOn: 0 | 1;
   stampCreated: boolean;
+  // US-111: read supports both Tasks emoji metadata and Dataview inline
+  // fields. This preference controls which flavor Task Center writes.
+  taskFormatFlavor: TaskFormatFlavor;
   // US-405: last tab the user was on when they closed the board. Persists
   // across Obsidian restarts so morning-open lands where evening-close
   // left off. Read in `TaskCenterView.constructor`'s ViewState init,
@@ -97,6 +100,8 @@ export interface TaskCenterSettings {
   // see USER_STORIES.md
   mobileForceLayout: boolean; // default false (auto = follow viewport width)
 }
+
+export type TaskFormatFlavor = "tasks" | "dataview";
 
 export type SavedViewStatus = "all" | TaskStatus | TaskStatus[];
 export type SavedViewTimeField = "scheduled" | "deadline" | "completed" | "created" | "dropped";
@@ -246,6 +251,7 @@ export const DEFAULT_SETTINGS: TaskCenterSettings = {
   openOnStartup: false,
   weekStartsOn: 1,
   stampCreated: true,
+  taskFormatFlavor: "tasks",
   lastTab: null,
   lastSavedViewId: null,
   mobileLongPressMs: 500,

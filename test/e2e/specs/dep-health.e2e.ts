@@ -13,8 +13,6 @@
  *     data-dep-warning="daily-notes-no-folder" so tests can assert it.
  *   - Warning must NOT appear when Daily Notes is enabled and configured.
  *
- * These tests currently FAIL because no such warning element is rendered —
- * the plugin silently falls back to inbox without surfacing anything.
  */
 import { browser, expect, $ } from "@wdio/globals";
 import { obsidianPage } from "wdio-obsidian-service";
@@ -54,7 +52,7 @@ async function configureDailyNotesFolder(folder = "Daily"): Promise<void> {
   }, folder);
 }
 
-async function fakeEnableTasks(): Promise<void> {
+async function fakeEnableTaskFormatCompanion(): Promise<void> {
   await browser.executeObsidian(async ({ app }) => {
     const p = (app as any).plugins;
     p.manifests["obsidian-tasks-plugin"] = {
@@ -67,11 +65,13 @@ async function fakeEnableTasks(): Promise<void> {
   });
 }
 
-async function cleanupFakeTasks(): Promise<void> {
+async function cleanupFakeTaskFormatCompanion(): Promise<void> {
   await browser.executeObsidian(async ({ app }) => {
     const p = (app as any).plugins;
     delete p.manifests["obsidian-tasks-plugin"];
     delete p.plugins["obsidian-tasks-plugin"];
+    delete p.manifests["dataview"];
+    delete p.plugins["dataview"];
   });
 }
 
@@ -83,7 +83,7 @@ describe("US-701 dependency health check (Daily Notes)", function () {
   afterEach(async function () {
     // Always restore Daily Notes so we don't bleed state into other specs.
     await enableDailyNotes();
-    await cleanupFakeTasks();
+    await cleanupFakeTaskFormatCompanion();
   });
 
   // US-701a: Daily Notes disabled → status bar must warn the user.
@@ -153,10 +153,10 @@ describe("US-701 dependency health check (Daily Notes)", function () {
   it("US-701c: no dep warning when Daily Notes is enabled and configured", async function () {
     await enableDailyNotes();
     await configureDailyNotesFolder();
-    // task #71 adds Tasks-plugin warnings to the same status-bar surface.
+    // task-format companion warnings share the same status-bar surface.
     // This Daily Notes healthy-state test needs all deps healthy, otherwise a
-    // valid `tasks-missing` warning would make `[data-dep-warning]` exist.
-    await fakeEnableTasks();
+    // valid companion warning would make `[data-dep-warning]` exist.
+    await fakeEnableTaskFormatCompanion();
 
     await browser.executeObsidianCommand("task-center:open");
     await forFlush();

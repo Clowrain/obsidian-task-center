@@ -1,22 +1,18 @@
 /**
- * US-701d/e/f: Dependency health check — Tasks community plugin
+ * US-701d/e/f: Dependency health check — task-format companion plugin
  *
- * The plugin integrates with the Obsidian Tasks community plugin for task
- * parsing compatibility. When Tasks is not installed or is disabled, the
- * current code continues silently without telling the user their Tasks-format
- * data may not display correctly. US-701d/e adds a status-bar warning.
+ * Task Center supports Tasks emoji and Dataview inline-field task metadata.
+ * The user should have at least one companion plugin enabled (Tasks or
+ * Dataview) so the same metadata renders or queries elsewhere in the vault.
  *
  * Detection logic (expected from implementation):
- *   - app.plugins.manifests["obsidian-tasks-plugin"] absent → "tasks-missing"
- *   - manifests present but app.plugins.plugins["obsidian-tasks-plugin"] absent → "tasks-disabled"
- *   - app.plugins.plugins["obsidian-tasks-plugin"] present → healthy (no warning)
+ *   - neither Tasks nor Dataview manifest present → "task-format-companion-missing"
+ *   - any manifest present but neither plugin loaded → "task-format-companion-disabled"
+ *   - either plugin loaded → healthy (no warning)
  *
  * Stable DOM attributes:
- *   data-dep-warning="tasks-missing"   — Tasks plugin not installed
- *   data-dep-warning="tasks-disabled"  — Tasks plugin installed but disabled
- *
- * All tests currently FAIL — no such warning element is rendered yet.
- * This is the Reviewer-first red commit for task #71.
+ *   data-dep-warning="task-format-companion-missing"
+ *   data-dep-warning="task-format-companion-disabled"
  */
 import { browser, expect, $ } from "@wdio/globals";
 import { obsidianPage } from "wdio-obsidian-service";
@@ -30,100 +26,82 @@ async function forFlush() {
   });
 }
 
-/** Remove any fake Tasks manifest/plugin injected by tests. */
-async function cleanupFakeTasks() {
+/** Remove any fake companion manifest/plugin injected by tests. */
+async function cleanupFakeCompanions() {
   await browser.executeObsidian(async ({ app }) => {
     const p = (app as any).plugins;
     delete p.manifests["obsidian-tasks-plugin"];
     delete p.plugins["obsidian-tasks-plugin"];
+    delete p.manifests["dataview"];
+    delete p.plugins["dataview"];
   });
 }
 
-/** Simulate Tasks plugin installed but disabled: manifest exists, plugin not loaded. */
-async function fakeInstallTasksDisabled() {
+/** Simulate Dataview installed but disabled: manifest exists, plugin not loaded. */
+async function fakeInstallDataviewDisabled() {
   await browser.executeObsidian(async ({ app }) => {
     const p = (app as any).plugins;
-    p.manifests["obsidian-tasks-plugin"] = {
-      id: "obsidian-tasks-plugin",
-      name: "Tasks",
+    p.manifests["dataview"] = {
+      id: "dataview",
+      name: "Dataview",
       version: "999.0.0",
       minAppVersion: "1.0.0",
     };
-    delete p.plugins["obsidian-tasks-plugin"];
+    delete p.plugins["dataview"];
   });
 }
 
-/** Simulate Tasks plugin installed and enabled: both manifest and loaded plugin present. */
-async function fakeEnableTasks() {
+/** Simulate Dataview enabled: both manifest and loaded plugin present. */
+async function fakeEnableDataview() {
   await browser.executeObsidian(async ({ app }) => {
     const p = (app as any).plugins;
-    p.manifests["obsidian-tasks-plugin"] = {
-      id: "obsidian-tasks-plugin",
-      name: "Tasks",
+    p.manifests["dataview"] = {
+      id: "dataview",
+      name: "Dataview",
       version: "999.0.0",
       minAppVersion: "1.0.0",
     };
-    p.plugins["obsidian-tasks-plugin"] = { _enabled: true };
+    p.plugins["dataview"] = { _enabled: true };
   });
 }
 
-describe("US-701d/e/f dependency health check (Tasks plugin)", function () {
+describe("US-701d/e/f dependency health check (task-format companion)", function () {
   beforeEach(async function () {
     await obsidianPage.resetVault(VAULT);
   });
 
   afterEach(async function () {
-    await cleanupFakeTasks();
+    await cleanupFakeCompanions();
   });
 
-  // US-701d: Tasks plugin not installed → status bar must warn.
-  //
-  // In the test vault the Tasks community plugin is not installed, so
-  // app.plugins.manifests["obsidian-tasks-plugin"] is absent by default.
-  // FAIL until: plugin emits data-dep-warning="tasks-missing".
-  it("US-701d: shows tasks-missing warning when Tasks plugin is not installed", async function () {
-    await cleanupFakeTasks(); // ensure no manifest
-
-    await browser.executeObsidianCommand("task-center:open");
-    await forFlush();
-
-    // Board must still open (plugin must not crash).
-    await expect($(".task-center-view")).toExist();
-
-    // BUG: no warning element is rendered — assertion FAILS.
-    await expect($('[data-dep-warning="tasks-missing"]')).toExist();
-  });
-
-  // US-701e: Tasks plugin installed but disabled → status bar must warn.
-  //
-  // FAIL until: plugin checks manifests vs plugins and emits
-  // data-dep-warning="tasks-disabled".
-  it("US-701e: shows tasks-disabled warning when Tasks plugin is installed but disabled", async function () {
-    await fakeInstallTasksDisabled();
+  it("US-701d: shows companion-missing warning when neither Tasks nor Dataview is installed", async function () {
+    await cleanupFakeCompanions();
 
     await browser.executeObsidianCommand("task-center:open");
     await forFlush();
 
     await expect($(".task-center-view")).toExist();
-
-    // BUG: no warning element is rendered — assertion FAILS.
-    await expect($('[data-dep-warning="tasks-disabled"]')).toExist();
+    await expect($('[data-dep-warning="task-format-companion-missing"]')).toExist();
   });
 
-  // US-701f: Tasks plugin enabled → no tasks-related warning must appear.
-  //
-  // This guards against false positives (always-visible warnings).
-  // FAIL until the feature lands (tasks-missing is always shown right now).
-  it("US-701f: no tasks warning when Tasks plugin is enabled", async function () {
-    await fakeEnableTasks();
+  it("US-701e: shows companion-disabled warning when a companion is installed but disabled", async function () {
+    await fakeInstallDataviewDisabled();
 
     await browser.executeObsidianCommand("task-center:open");
     await forFlush();
 
     await expect($(".task-center-view")).toExist();
+    await expect($('[data-dep-warning="task-format-companion-disabled"]')).toExist();
+  });
 
-    // No tasks-* warning must appear when Tasks is loaded.
-    await expect($('[data-dep-warning="tasks-missing"]')).not.toExist();
-    await expect($('[data-dep-warning="tasks-disabled"]')).not.toExist();
+  it("US-701f: no companion warning when Dataview is enabled", async function () {
+    await fakeEnableDataview();
+
+    await browser.executeObsidianCommand("task-center:open");
+    await forFlush();
+
+    await expect($(".task-center-view")).toExist();
+    await expect($('[data-dep-warning="task-format-companion-missing"]')).not.toExist();
+    await expect($('[data-dep-warning="task-format-companion-disabled"]')).not.toExist();
   });
 });

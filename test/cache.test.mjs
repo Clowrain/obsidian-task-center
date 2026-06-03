@@ -205,6 +205,21 @@ test("ensureAll: can load from metadata changed candidates without cached-file e
   assert.equal(cache.__stats.parseCount, 1);
 });
 
+test("US-111: cache reads Dataview scheduled field without parser settings", async () => {
+  const app = makeApp([
+    {
+      path: "Tasks/t1.md",
+      hasTask: true,
+      content: "- [ ] Alpha [scheduled:: 2026-06-01]\n",
+    },
+  ]);
+  const cache = new TaskCache(app);
+  cache.bind();
+
+  const tasks = await cache.ensureAll();
+  assert.equal(tasks[0].scheduled, "2026-06-01");
+});
+
 test("ensureAll: after initial board load, picks up externally added tasks even without changed event", async () => {
   const app = makeApp([
     {

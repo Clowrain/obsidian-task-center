@@ -5,10 +5,10 @@
 //      Quick Add / addTask resolve their write target through it. When
 //      it's disabled or has no configured folder, Quick Add / add fail
 //      without writing to an inbox fallback.
-//   2. The Obsidian Tasks community plugin — when present, our parser
-//      stays format-compatible with what Tasks renders. When absent,
-//      Tasks-format extensions in the user's notes may not display the
-//      way they're used to.
+//   2. A task-format companion plugin: Obsidian Tasks or Dataview. Task
+//      Center can read/write both flavors itself, but users generally expect
+//      at least one companion to render/query the same metadata elsewhere in
+//      the vault.
 //
 // Both classes of dependency surface through one widget — the status-bar
 // `DepHealthBanner` — to avoid two competing notice strips. Each active
@@ -22,8 +22,8 @@ import { t as tr } from "./i18n";
 export type DepWarningCode =
   | "daily-notes-disabled"
   | "daily-notes-no-folder"
-  | "tasks-missing"
-  | "tasks-disabled";
+  | "task-format-companion-missing"
+  | "task-format-companion-disabled";
 
 interface InternalPluginShape {
   enabled?: boolean;
@@ -31,6 +31,7 @@ interface InternalPluginShape {
 }
 
 const TASKS_PLUGIN_ID = "obsidian-tasks-plugin";
+const DATAVIEW_PLUGIN_ID = "dataview";
 
 /** Pure check: returns the worst-currently-true Daily Notes warning, or null.
  *
@@ -48,32 +49,34 @@ export function checkDailyNotes(app: App | null | undefined): DepWarningCode | n
   return null;
 }
 
-/** Pure check: returns the Tasks community-plugin warning, or null.
+/** Pure check: returns the task-format companion warning, or null.
  *
- * `app.plugins.manifests[TASKS_PLUGIN_ID]` ⇒ user has the plugin installed
- * (Obsidian saw the manifest on disk). `app.plugins.plugins[TASKS_PLUGIN_ID]`
- * ⇒ the plugin is loaded — i.e. enabled. The "healthy" branch keys on the
- * loaded entry, not the manifest, so `fakeEnableTasks()` test fixtures that
- * inject only the loaded entry still count as healthy.
+ * Either Tasks or Dataview being loaded is healthy. If neither is loaded but
+ * at least one manifest exists, the user has a companion installed but disabled.
+ * If neither manifest exists, no supported companion is installed.
  */
-export function checkTasksPlugin(app: App | null | undefined): DepWarningCode | null {
+export function checkTaskFormatCompanion(app: App | null | undefined): DepWarningCode | null {
   const plugins = (app as unknown as {
     plugins?: { manifests?: Record<string, unknown>; plugins?: Record<string, unknown> };
   })?.plugins;
-  if (plugins?.plugins?.[TASKS_PLUGIN_ID]) return null;
-  if (plugins?.manifests?.[TASKS_PLUGIN_ID]) return "tasks-disabled";
-  return "tasks-missing";
+  const loaded = plugins?.plugins ?? {};
+  const manifests = plugins?.manifests ?? {};
+  if (loaded[TASKS_PLUGIN_ID] || loaded[DATAVIEW_PLUGIN_ID]) return null;
+  if (manifests[TASKS_PLUGIN_ID] || manifests[DATAVIEW_PLUGIN_ID]) {
+    return "task-format-companion-disabled";
+  }
+  return "task-format-companion-missing";
 }
 
 /**
  * The full set of checks the banner runs, in display order. Daily Notes
  * comes first because its failure affects the *write* path (where Quick
- * Add lands); Tasks comes second because its failure affects *render*
- * compatibility (lossier but recoverable).
+ * Add lands); the format companion comes second because its failure affects
+ * cross-plugin render/query compatibility (lossier but recoverable).
  */
 const CHECKS: Array<(app: App | null | undefined) => DepWarningCode | null> = [
   checkDailyNotes,
-  checkTasksPlugin,
+  checkTaskFormatCompanion,
 ];
 
 function warningMessageKey(code: DepWarningCode): Parameters<typeof tr>[0] {
@@ -82,10 +85,10 @@ function warningMessageKey(code: DepWarningCode): Parameters<typeof tr>[0] {
       return "dep.dailyNotesDisabled";
     case "daily-notes-no-folder":
       return "dep.dailyNotesNoFolder";
-    case "tasks-missing":
-      return "dep.tasksMissing";
-    case "tasks-disabled":
-      return "dep.tasksDisabled";
+    case "task-format-companion-missing":
+      return "dep.taskFormatCompanionMissing";
+    case "task-format-companion-disabled":
+      return "dep.taskFormatCompanionDisabled";
   }
 }
 
@@ -102,8 +105,8 @@ export interface DepHealthBannerOptions {
  * (US-701c / US-701f — guard against false positives).
  *
  * Layout: warnings render in `CHECKS` order so the user sees the
- * write-path issue (Daily Notes) before the render-compatibility one
- * (Tasks). Both can show simultaneously without overwriting each other.
+ * write-path issue (Daily Notes) before the render/query-compatibility one.
+ * Both can show simultaneously without overwriting each other.
  */
 export class DepHealthBanner {
   private active: DepWarningCode[] = [];

@@ -29,6 +29,7 @@ function compile() {
 compile();
 const {
   setEmojiDate,
+  setScheduledLine,
   setInlineField,
   setCheckbox,
   addTagIfMissing,
@@ -74,6 +75,21 @@ test("setEmojiDate — strip duplicate ⏳ defensively", () => {
 test("setEmojiDate — different emoji preserved", () => {
   const r = setEmojiDate("- [ ] task 📅 2026-05-15 ⏳ 2026-04-20", "⏳", "2026-04-25");
   assert.equal(r, "- [ ] task 📅 2026-05-15 ⏳ 2026-04-25");
+});
+
+test("US-111: setScheduledLine writes Tasks format and removes Dataview scheduled", () => {
+  const r = setScheduledLine("- [ ] task [scheduled:: 2026-04-20]", "2026-04-25", "tasks");
+  assert.equal(r, "- [ ] task ⏳ 2026-04-25");
+});
+
+test("US-111: setScheduledLine writes Dataview format and removes Tasks scheduled", () => {
+  const r = setScheduledLine("- [ ] task ⏳ 2026-04-20", "2026-04-25", "dataview");
+  assert.equal(r, "- [ ] task [scheduled:: 2026-04-25]");
+});
+
+test("US-111: setScheduledLine clear removes both scheduled syntaxes", () => {
+  const r = setScheduledLine("- [ ] task ⏳ 2026-04-20 [scheduled:: 2026-04-25]", null, "dataview");
+  assert.equal(r, "- [ ] task");
 });
 
 test("setCheckbox — todo → done", () => {
@@ -791,6 +807,71 @@ test("setScheduled — clear ⏳ (date=null)", async () => {
   assert.equal(data, "- [ ] task");
 });
 
+test("US-111: setScheduled writes Dataview format via vault.process", async () => {
+  const initial = "- [ ] task ⏳ 2026-04-20";
+  const file = new TFile();
+  file.path = "f.md";
+  file.extension = "md";
+  file.stat = { mtime: 1000 };
+  let data = initial;
+  const app = {
+    vault: {
+      getAbstractFileByPath: (p) => (p === "f.md" ? file : null),
+      process: async (_f, fn) => { data = fn(data); },
+    },
+  };
+  const task = { path: "f.md", line: 0, rawLine: initial };
+  const r = await setScheduled(app, task, "2026-04-25", "dataview");
+  assert.equal(r.after, "- [ ] task [scheduled:: 2026-04-25]");
+  assert.equal(data, "- [ ] task [scheduled:: 2026-04-25]");
+});
+
+test("US-111: addTask writes Dataview task metadata flavor when requested", async () => {
+  const file = new TFile();
+  file.path = "daily.md";
+  file.extension = "md";
+  file.stat = { mtime: 1000 };
+  let data = "Existing\n";
+  const app = {
+    vault: {
+      getAbstractFileByPath: (p) => (p === "daily.md" ? file : null),
+      process: async (_f, fn) => { data = fn(data); },
+    },
+  };
+  const result = await addTask(app, {
+    text: "new task",
+    targetPath: "daily.md",
+    scheduled: "2026-04-25",
+    deadline: "2026-05-01",
+    taskFormat: "dataview",
+    stampCreated: true,
+  });
+  assert.equal(result.line, 1);
+  assert.match(
+    data,
+    /^Existing\n- \[ \] new task \[created:: \d{4}-\d{2}-\d{2}\] \[due:: 2026-05-01\] \[scheduled:: 2026-04-25\]$/,
+  );
+});
+
+test("US-111: setDeadline writes Dataview due field and removes Tasks due", async () => {
+  const initial = "- [ ] task 📅 2026-05-14";
+  const file = new TFile();
+  file.path = "f.md";
+  file.extension = "md";
+  file.stat = { mtime: 1000 };
+  let data = initial;
+  const app = {
+    vault: {
+      getAbstractFileByPath: (p) => (p === "f.md" ? file : null),
+      process: async (_f, fn) => { data = fn(data); },
+    },
+  };
+  const task = { path: "f.md", line: 0, rawLine: initial };
+  const r = await setDeadline(app, task, "2026-05-15", "dataview");
+  assert.equal(r.after, "- [ ] task [due:: 2026-05-15]");
+  assert.equal(data, "- [ ] task [due:: 2026-05-15]");
+});
+
 test("markDone — todo → done via vault.process", async () => {
   const initial = "- [ ] important task";
   const file = new TFile();
@@ -828,6 +909,25 @@ test("markDone — already done → unchanged (idempotent)", async () => {
   const r = await markDone(app, task, "2026-04-30");
   assert.equal(r.unchanged, true);
   assert.equal(data, initial);
+});
+
+test("US-111: markDone writes Dataview completion field when requested", async () => {
+  const initial = "- [ ] important task ✅ 2026-04-29";
+  const file = new TFile();
+  file.path = "f.md";
+  file.extension = "md";
+  file.stat = { mtime: 1000 };
+  let data = initial;
+  const app = {
+    vault: {
+      getAbstractFileByPath: (p) => (p === "f.md" ? file : null),
+      process: async (_f, fn) => { data = fn(data); },
+    },
+  };
+  const task = { path: "f.md", line: 0, rawLine: initial };
+  const r = await markDone(app, task, "2026-04-30", "dataview");
+  assert.equal(r.after, "- [x] important task [completion:: 2026-04-30]");
+  assert.equal(data, "- [x] important task [completion:: 2026-04-30]");
 });
 
 test("markDropped — todo → dropped via vault.process", async () => {
@@ -868,6 +968,25 @@ test("markDropped — already dropped → unchanged (idempotent)", async () => {
   const r = await markDropped(app, task, "2026-05-01");
   assert.equal(r.unchanged, true);
   assert.equal(data, initial);
+});
+
+test("US-111: markDropped writes Dataview cancelled field when requested", async () => {
+  const initial = "- [ ] stale task ❌ 2026-04-30 #dropped";
+  const file = new TFile();
+  file.path = "f.md";
+  file.extension = "md";
+  file.stat = { mtime: 1000 };
+  let data = initial;
+  const app = {
+    vault: {
+      getAbstractFileByPath: (p) => (p === "f.md" ? file : null),
+      process: async (_f, fn) => { data = fn(data); },
+    },
+  };
+  const task = { path: "f.md", line: 0, rawLine: initial };
+  const r = await markDropped(app, task, "2026-05-01", "dataview");
+  assert.equal(r.after, "- [-] stale task [cancelled:: 2026-05-01]");
+  assert.equal(data, "- [-] stale task [cancelled:: 2026-05-01]");
 });
 
 test("markUndone — done → todo via vault.process", async () => {

@@ -41,6 +41,8 @@ Task Center 必须兼容这些 Obsidian Tasks 约定：
 - `[字段名:: 值]` inline field，例如 `[estimate:: 90m]`、`[actual:: 75m]`
 - 合法 Obsidian hashtag，例如 `#project`
 
+`US-111` 已经混用 Obsidian Tasks 与 Dataview inline fields 管理任务日期的用户，希望读取时 Tasks emoji 与 Dataview inline field 两种任务格式都能被识别，写入时可以选择自己的 Tasks flavor。Task Center 读取侧同时兼容 `⏳/📅/🛫/➕/✅/❌/🔁/优先级 emoji` 与 `[scheduled::]`、`[due::]`、`[start::]`、`[created::]`、`[completion::]`、`[cancelled::]`、`[repeat::]`、`[priority::]`；同一字段两种格式同时存在时 Tasks emoji 优先。设置页提供“任务格式风味”偏好：Tasks flavor 写 emoji 字段，Dataview flavor 写 bracket inline fields。拖拽改期、日期选择、完成、放弃、Quick Add、CLI add / schedule / deadline / done / drop 都必须遵守同一偏好。
+
 ### 1.3 字节级保留
 
 `US-407` 即使 UI 暂时不展示某些字段，改名、移动、嵌套、写回时也必须原样保留所有未知 emoji、inline field、tag、block id、wikilink anchor 与用户原文。
@@ -797,13 +799,13 @@ npx skills add CorrectRoadH/obsidian-task-center
 
 `US-701c` 配置修复后，警告自动消失，无需重启 Obsidian。
 
-### 15.3 Obsidian Tasks 依赖
+### 15.3 任务格式 companion 依赖
 
-`US-701d` Tasks 社区插件未安装时，状态栏展示 `data-dep-warning="tasks-missing"`。
+`US-701d` Tasks 与 Dataview 社区插件都未安装时，状态栏展示 `data-dep-warning="task-format-companion-missing"`。
 
-`US-701e` Tasks 已安装但禁用时，状态栏展示 `data-dep-warning="tasks-disabled"`。
+`US-701e` Tasks 或 Dataview 至少安装了一个但两者都未启用时，状态栏展示 `data-dep-warning="task-format-companion-disabled"`。
 
-`US-701f` Tasks 正常启用时，不显示 tasks 相关警告。
+`US-701f` Tasks 或 Dataview 任意一个正常启用时，不显示任务格式 companion 相关警告。
 
 ## 16. CLI / AI Agent 故事
 

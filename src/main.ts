@@ -69,7 +69,9 @@ export default class TaskCenterPlugin extends Plugin {
     await this.loadSettings();
     this.cache = new TaskCache(this.app);
     for (const ref of this.cache.bind()) this.registerEvent(ref);
-    this.api = new TaskCenterApi(this.app, this.cache);
+    this.api = new TaskCenterApi(this.app, this.cache, () => ({
+      taskFormatFlavor: this.settings.taskFormatFlavor,
+    }));
 
     // View
     this.registerTaskCenterView();
@@ -131,7 +133,7 @@ export default class TaskCenterPlugin extends Plugin {
     });
     this.app.workspace.onLayoutReady(() => this.statusBar?.refresh());
 
-    // US-701: surface dep-health for the built-in Daily Notes plugin.
+    // US-701: surface dep-health for Daily Notes and task-format companions.
     // The banner owns its own status-bar item and `data-dep-warning`
     // attribute. We refresh on layout-ready (initial paint) and on
     // every `layout-change` (covers the user toggling the plugin in
@@ -267,11 +269,16 @@ export default class TaskCenterPlugin extends Plugin {
     // Strip legacy flat savedViews from loaded data (VAL-CROSS-002):
     // old data.json may carry `savedViews` which must not leak into runtime.
     delete (merged as Record<string, unknown>).savedViews;
+    const loadedTaskFormatFlavor =
+      (merged as TaskCenterSettings & { scheduledWriteFormat?: unknown }).taskFormatFlavor
+      ?? (merged as TaskCenterSettings & { scheduledWriteFormat?: unknown }).scheduledWriteFormat;
+    delete (merged as Record<string, unknown>).scheduledWriteFormat;
     this.settings = {
       ...merged,
       queryPresets,
       defaultSavedViewId,
       lastSavedViewId,
+      taskFormatFlavor: loadedTaskFormatFlavor === "dataview" ? "dataview" : "tasks",
     };
   }
 

@@ -124,6 +124,21 @@ export class TaskCenterSettingTab extends PluginSettingTab {
         }),
       );
 
+    new Setting(containerEl)
+      .setName(tr("settings.taskFormatFlavor.name"))
+      .setDesc(tr("settings.taskFormatFlavor.desc"))
+      .addDropdown((dd) =>
+        dd
+          .addOption("tasks", tr("settings.taskFormatFlavor.tasks"))
+          .addOption("dataview", tr("settings.taskFormatFlavor.dataview"))
+          .setValue(this.plugin.settings.taskFormatFlavor)
+          .onChange(async (value) => {
+            this.plugin.settings.taskFormatFlavor = value === "dataview" ? "dataview" : "tasks";
+            await this.plugin.saveSettings();
+            await this.plugin.refreshOpenViews();
+          }),
+      );
+
     // US-510: mobile-specific settings. Always rendered so cross-device
     // syncs (desktop user configuring their phone behaviour) work; the
     // values are no-ops on desktop. Heading is shown unconditionally.

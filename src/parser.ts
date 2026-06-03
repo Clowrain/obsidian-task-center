@@ -3,6 +3,7 @@ import { ParsedTask, TaskStatus } from "./types";
 import { extractMarkdownTags, stripMarkdownTags } from "./tags";
 
 const SCHEDULED_RE = /⏳\s*(\d{4}-\d{2}-\d{2})/;
+const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const DEADLINE_RE = /📅\s*(\d{4}-\d{2}-\d{2})/;
 const START_RE = /🛫\s*(\d{4}-\d{2}-\d{2})/;
 const DONE_RE = /✅\s*(\d{4}-\d{2}-\d{2})/;
@@ -92,6 +93,26 @@ export function parseInlineFields(content: string): {
   return { inlineFields, durationFields };
 }
 
+function inlineDateField(
+  inlineFields: Record<string, string[]>,
+  name: string,
+): string | null {
+  const value = inlineFields[name]?.find((candidate) => ISO_DATE_RE.test(candidate.trim()));
+  return value?.trim() ?? null;
+}
+
+function priorityFromDataviewField(inlineFields: Record<string, string[]>): string | null {
+  const value = inlineFields.priority?.find((candidate) => candidate.trim().length > 0)?.trim().toLowerCase();
+  switch (value) {
+    case "highest": return "🔺";
+    case "high": return "⏫";
+    case "medium": return "🔼";
+    case "low": return "🔽";
+    case "lowest": return "⏬";
+    default: return null;
+  }
+}
+
 export function parseTaskLine(line: string): {
   indent: string;
   marker: string;
@@ -165,20 +186,28 @@ export function parseTaskFromLine(
 
   const content = parsed.content;
   const tagMatches = extractMarkdownTags(content);
-  const scheduled = content.match(SCHEDULED_RE)?.[1] ?? null;
-  const deadline = content.match(DEADLINE_RE)?.[1] ?? null;
-  const start = content.match(START_RE)?.[1] ?? null;
-  const completed = content.match(DONE_RE)?.[1] ?? null;
-  const cancelled = content.match(CANCELLED_RE)?.[1] ?? null;
-  const created = content.match(CREATED_RE)?.[1] ?? null;
+  const { inlineFields, durationFields } = parseInlineFields(content);
+  const emojiScheduled = content.match(SCHEDULED_RE)?.[1] ?? null;
+  const emojiDeadline = content.match(DEADLINE_RE)?.[1] ?? null;
+  const emojiStart = content.match(START_RE)?.[1] ?? null;
+  const emojiCompleted = content.match(DONE_RE)?.[1] ?? null;
+  const emojiCancelled = content.match(CANCELLED_RE)?.[1] ?? null;
+  const emojiCreated = content.match(CREATED_RE)?.[1] ?? null;
   // US-142a: parse priority and recurrence from the raw content line
   // so they are available for writer byte-preservation and card rendering.
-  const priority = content.match(PRIORITY_RE)?.[0] ?? null;
-  const recurrence = content.match(RECURRENCE_RE)?.[1]?.trim() ?? null;
+  const priority = content.match(PRIORITY_RE)?.[0] ?? priorityFromDataviewField(inlineFields);
+  const recurrence = content.match(RECURRENCE_RE)?.[1]?.trim()
+    ?? inlineFields.repeat?.find((candidate) => candidate.trim().length > 0)?.trim()
+    ?? null;
   // US-406: calloutDepth counts `>` characters in the indent so the
   // writer can reconstruct the exact callout prefix when writing back.
   const calloutDepth = (parsed.indent.match(/>/g) || []).length;
-  const { inlineFields, durationFields } = parseInlineFields(content);
+  const scheduled = emojiScheduled ?? inlineDateField(inlineFields, "scheduled");
+  const deadline = emojiDeadline ?? inlineDateField(inlineFields, "due");
+  const start = emojiStart ?? inlineDateField(inlineFields, "start");
+  const completed = emojiCompleted ?? inlineDateField(inlineFields, "completion");
+  const cancelled = emojiCancelled ?? inlineDateField(inlineFields, "cancelled");
+  const created = emojiCreated ?? inlineDateField(inlineFields, "created");
   const estimate = durationFields.estimate ?? null;
   const actual = durationFields.actual ?? null;
 

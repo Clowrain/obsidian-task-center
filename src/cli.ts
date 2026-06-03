@@ -1,5 +1,12 @@
 import { App } from "obsidian";
-import { ParsedTask, TaskStatus, type QueryPreset, type QueryPresetViewConfig, type QueryViewType } from "./types";
+import {
+  ParsedTask,
+  TaskStatus,
+  type QueryPreset,
+  type QueryPresetViewConfig,
+  type QueryViewType,
+  type TaskFormatFlavor,
+} from "./types";
 import { formatMinutes } from "./parser";
 import {
   setScheduled,
@@ -171,7 +178,14 @@ export interface ReviewResult {
 }
 
 export class TaskCenterApi {
-  constructor(private readonly app: App, private readonly cache: TaskCache) {}
+  constructor(
+    private readonly app: App,
+    private readonly cache: TaskCache,
+    private readonly getWriteSettings: () => {
+      taskFormatFlavor?: TaskFormatFlavor;
+      scheduledWriteFormat?: TaskFormatFlavor;
+    } = () => ({}),
+  ) {}
 
   /**
    * Whole-vault snapshot. Used by `list` / `stats` / formatters that need the
@@ -231,7 +245,7 @@ export class TaskCenterApi {
     }
     const task = await this.cache.resolveRef(id);
     if (!task) throw new TaskWriterError("not_found", id);
-    return await setScheduled(this.app, task, date);
+    return await setScheduled(this.app, task, date, this.taskFormatFlavor());
   }
 
   async deadline(id: string, date: string | null) {
@@ -240,7 +254,7 @@ export class TaskCenterApi {
     }
     const task = await this.cache.resolveRef(id);
     if (!task) throw new TaskWriterError("not_found", id);
-    return await setDeadline(this.app, task, date);
+    return await setDeadline(this.app, task, date, this.taskFormatFlavor());
   }
 
   async actual(id: string, minutes: number, mode: "set" | "add" = "set") {
@@ -275,9 +289,9 @@ export class TaskCenterApi {
     const targets = [task, ...descendants];
     // Bottom-up so line numbers stay stable across each mutation.
     targets.sort((a, b) => b.line - a.line);
-    let lastResult = await markDone(this.app, targets[0], at);
+    let lastResult = await markDone(this.app, targets[0], at, this.taskFormatFlavor());
     for (let i = 1; i < targets.length; i++) {
-      lastResult = await markDone(this.app, targets[i], at);
+      lastResult = await markDone(this.app, targets[i], at, this.taskFormatFlavor());
     }
     return lastResult;
   }
@@ -311,7 +325,7 @@ export class TaskCenterApi {
     targets.sort((a, b) => b.line - a.line);
     const results: DropResult[] = [];
     for (const t of targets) {
-      const r = await markDropped(this.app, t);
+      const r = await markDropped(this.app, t, null, this.taskFormatFlavor());
       results.push({
         path: t.path,
         line: t.line,
@@ -350,6 +364,7 @@ export class TaskCenterApi {
       targetPath: opts.to,
       tags: opts.tag,
       scheduled: opts.scheduled ?? null,
+      taskFormat: this.taskFormatFlavor(),
       deadline: opts.deadline ?? null,
       estimate: opts.estimate ?? null,
       parent,
@@ -375,6 +390,12 @@ export class TaskCenterApi {
     const parent = await this.cache.resolveRef(parentId);
     if (!parent) throw new TaskWriterError("not_found", `parent: ${parentId}`);
     return await nestUnder(this.app, child, parent);
+  }
+
+  private taskFormatFlavor(): TaskFormatFlavor {
+    const settings = this.getWriteSettings();
+    const flavor = settings.taskFormatFlavor ?? settings.scheduledWriteFormat;
+    return flavor === "dataview" ? "dataview" : "tasks";
   }
 }
 

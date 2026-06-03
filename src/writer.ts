@@ -8,7 +8,7 @@
 //          state at the API layer.
 // see USER_STORIES.md
 import { App, TFile, normalizePath } from "obsidian";
-import { ParsedTask } from "./types";
+import { ParsedTask, type TaskFormatFlavor } from "./types";
 import { parseTaskLine, formatMinutes } from "./parser";
 
 // Re-exported so writer.test.mjs can construct TFile instances that pass
@@ -76,6 +76,44 @@ export function setInlineField(line: string, name: string, value: string | null)
   return stripped.trimEnd() + ` [${name}:: ${value}]`;
 }
 
+function clearInlineFieldAll(line: string, name: string): string {
+  const escaped = name.replace(/[-/\\^$*+?.()|[\]{}]/g, "\\$&");
+  const re = new RegExp(`\\s*\\[${escaped}::\\s*[^\\]]*\\]`, "gi");
+  return line.replace(re, "");
+}
+
+export function setScheduledLine(
+  line: string,
+  date: string | null,
+  flavor: TaskFormatFlavor = "tasks",
+): string {
+  return setTaskDateLine(line, "scheduled", date, flavor);
+}
+
+type TaskDateField = "scheduled" | "due" | "created" | "completion" | "cancelled";
+
+const TASK_DATE_EMOJI: Record<TaskDateField, string> = {
+  scheduled: "⏳",
+  due: "📅",
+  created: "➕",
+  completion: "✅",
+  cancelled: "❌",
+};
+
+export function setTaskDateLine(
+  line: string,
+  field: TaskDateField,
+  date: string | null,
+  flavor: TaskFormatFlavor = "tasks",
+): string {
+  let next = setEmojiDate(line, TASK_DATE_EMOJI[field], null);
+  next = clearInlineFieldAll(next, field);
+  if (date === null) return next;
+  return flavor === "dataview"
+    ? setInlineField(next, field, date)
+    : setEmojiDate(next, TASK_DATE_EMOJI[field], date);
+}
+
 // Swap the checkbox character — accepts callout `> ` prefix(es). Exported for unit tests.
 export function setCheckbox(line: string, char: string): string {
   return line.replace(/^(\s*(?:>\s*)*[-+*]\s+\[).(\])/, `$1${char}$2`);
@@ -141,9 +179,10 @@ export async function setScheduled(
   app: App,
   task: ParsedTask,
   date: string | null,
+  flavor: TaskFormatFlavor = "tasks",
 ): Promise<{ before: string; after: string; unchanged: boolean }> {
   const { before, after } = await mutateLine(app, task.path, task.line, (raw) => {
-    const nl = setEmojiDate(raw, "⏳", date);
+    const nl = setScheduledLine(raw, date, flavor);
     return nl === raw ? null : nl;
   });
   return { before, after, unchanged: before === after };
@@ -153,9 +192,10 @@ export async function setDeadline(
   app: App,
   task: ParsedTask,
   date: string | null,
+  flavor: TaskFormatFlavor = "tasks",
 ): Promise<{ before: string; after: string; unchanged: boolean }> {
   const { before, after } = await mutateLine(app, task.path, task.line, (raw) => {
-    const nl = setEmojiDate(raw, "📅", date);
+    const nl = setTaskDateLine(raw, "due", date, flavor);
     return nl === raw ? null : nl;
   });
   return { before, after, unchanged: before === after };
@@ -204,14 +244,19 @@ export async function markDone(
   app: App,
   task: ParsedTask,
   at: string | null,
+  flavor: TaskFormatFlavor = "tasks",
 ): Promise<{ before: string; after: string; unchanged: boolean }> {
   const dateStr = at ?? today();
   const { before, after } = await mutateLine(app, task.path, task.line, (raw) => {
-    if (/^\s*(?:>\s*)*[-+*]\s+\[[xX]\]/.test(raw) && new RegExp(`✅\\s*${dateStr}`).test(raw)) {
+    if (
+      /^\s*(?:>\s*)*[-+*]\s+\[[xX]\]/.test(raw) &&
+      (new RegExp(`✅\\s*${dateStr}`).test(raw) ||
+        new RegExp(`\\[completion::\\s*${dateStr}\\]`, "i").test(raw))
+    ) {
       return null;
     }
     let nl = setCheckbox(raw, "x");
-    nl = setEmojiDate(nl, "✅", dateStr);
+    nl = setTaskDateLine(nl, "completion", dateStr, flavor);
     return nl === raw ? null : nl;
   });
   return { before, after, unchanged: before === after };
@@ -222,11 +267,15 @@ export async function markUndone(
   task: ParsedTask,
 ): Promise<{ before: string; after: string; unchanged: boolean }> {
   const { before, after } = await mutateLine(app, task.path, task.line, (raw) => {
-    if (/^\s*(?:>\s*)*[-+*]\s+\[\s\]/.test(raw) && !/✅\s*\d{4}-\d{2}-\d{2}/.test(raw)) {
+    if (
+      /^\s*(?:>\s*)*[-+*]\s+\[\s\]/.test(raw) &&
+      !/✅\s*\d{4}-\d{2}-\d{2}/.test(raw) &&
+      !/\[completion::\s*\d{4}-\d{2}-\d{2}\]/i.test(raw)
+    ) {
       return null;
     }
     let nl = setCheckbox(raw, " ");
-    nl = setEmojiDate(nl, "✅", null);
+    nl = setTaskDateLine(nl, "completion", null);
     return nl === raw ? null : nl;
   });
   return { before, after, unchanged: before === after };
@@ -242,17 +291,19 @@ export async function markDropped(
   app: App,
   task: ParsedTask,
   at: string | null = null,
+  flavor: TaskFormatFlavor = "tasks",
 ): Promise<{ before: string; after: string; unchanged: boolean }> {
   const dateStr = at ?? today();
   const { before, after } = await mutateLine(app, task.path, task.line, (raw) => {
     if (
       /^\s*(?:>\s*)*[-+*]\s+\[-\]/.test(raw) &&
-      new RegExp(`❌\\s*${dateStr}`).test(raw)
+      (new RegExp(`❌\\s*${dateStr}`).test(raw) ||
+        new RegExp(`\\[cancelled::\\s*${dateStr}\\]`, "i").test(raw))
     ) {
       return null;
     }
     let nl = setCheckbox(raw, "-");
-    nl = setEmojiDate(nl, "❌", dateStr);
+    nl = setTaskDateLine(nl, "cancelled", dateStr, flavor);
     // Cleanup legacy: strip a pre-existing #dropped tag (old convention)
     nl = nl.replace(/\s*#dropped\b/g, "");
     return nl === raw ? null : nl;
@@ -347,6 +398,7 @@ export interface AddTaskOpts {
   targetPath?: string;
   tags?: string[];
   scheduled?: string | null;
+  taskFormat?: TaskFormatFlavor;
   deadline?: string | null;
   estimate?: number | null;
   parent?: ParsedTask | null;
@@ -384,6 +436,7 @@ function todayFilename(folder: string, format?: string): string {
 
 function buildTaskLine(opts: AddTaskOpts, indent: string): string {
   const parts: string[] = [`${indent}- [${opts.checkbox ?? " "}] ${opts.text.trim()}`];
+  const flavor = opts.taskFormat ?? "tasks";
   if (opts.tags && opts.tags.length > 0) {
     for (const t of opts.tags) {
       const bare = t.startsWith("#") ? t.slice(1) : t;
@@ -397,10 +450,17 @@ function buildTaskLine(opts: AddTaskOpts, indent: string): string {
     // day, so repeating it on every subtask is just noise. Cross-day
     // children still get their own ➕ for accurate retros.
     // see USER_STORIES.md
-    if (opts.parent?.created !== stamp) parts.push(`➕ ${stamp}`);
+    if (opts.parent?.created !== stamp) {
+      parts.push(flavor === "dataview" ? `[created:: ${stamp}]` : `➕ ${stamp}`);
+    }
   }
-  if (opts.deadline) parts.push(`📅 ${opts.deadline}`);
-  if (opts.scheduled) parts.push(`⏳ ${opts.scheduled}`);
+  if (opts.deadline) {
+    parts.push(flavor === "dataview" ? `[due:: ${opts.deadline}]` : `📅 ${opts.deadline}`);
+  }
+  if (opts.scheduled) {
+    if (flavor === "dataview") parts.push(`[scheduled:: ${opts.scheduled}]`);
+    else parts.push(`⏳ ${opts.scheduled}`);
+  }
   if (opts.estimate) parts.push(`[estimate:: ${formatMinutes(opts.estimate)}]`);
   return parts.join(" ");
 }
@@ -666,7 +726,7 @@ export function planSameFileNest(
   }
   // VAL-CORE-011: clear ⏳ from the moved root task only; descendants keep theirs.
   // Uses a copy so the undo ops' `before` still carries the original ⏳ for restore.
-  const clearedBlock = [setEmojiDate(block[0], "⏳", null), ...block.slice(1)];
+  const clearedBlock = [setScheduledLine(block[0], null), ...block.slice(1)];
   const reindented = reindentBlock(clearedBlock, childIndentLen, newIndent);
   const without = lines.slice(0, childLine).concat(lines.slice(childLine + block.length));
   const adjustedParentLine =
@@ -707,7 +767,7 @@ export function planCrossFileNest(
   const block = extractTaskBlock(childLines, childLine, childIndentLen);
   // VAL-CORE-011: clear ⏳ from the moved root task only; descendants keep theirs.
   // Uses a copy so the undo ops' `before` still carries the original ⏳ for restore.
-  const clearedBlock = [setEmojiDate(block[0], "⏳", null), ...block.slice(1)];
+  const clearedBlock = [setScheduledLine(block[0], null), ...block.slice(1)];
   const reindented = reindentBlock(clearedBlock, childIndentLen, newIndent);
   const insertIndex = findChildrenEnd(parentLines, parent.line, parent.indentLen);
   const newParentLines = parentLines
@@ -862,7 +922,7 @@ export async function nestUnder(
   const block = extractTaskBlock(childLinesSnapshot, child.line, childIndentLen);
   // VAL-CORE-011: clear ⏳ from the moved root task only; descendants keep theirs.
   // Uses a copy so the child-file delete step still matches the original block.
-  const clearedBlock = [setEmojiDate(block[0], "⏳", null), ...block.slice(1)];
+  const clearedBlock = [setScheduledLine(block[0], null), ...block.slice(1)];
 
   // Step 1: append to parent file (verifies parent line still matches).
   // task #57: defer the new-child indent decision until we have the

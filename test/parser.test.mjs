@@ -243,6 +243,77 @@ test("VAL-CORE-001: parseTaskFromLine extracts Obsidian Tasks emoji fields", () 
   assert.equal(task?.created, "2026-04-19");
 });
 
+test("US-111: parseTaskFromLine reads Dataview scheduled field when emoji is absent", () => {
+  const task = parseTaskFromLine(
+    "test.md",
+    0,
+    "- [ ] task [scheduled:: 2026-06-01]",
+    null,
+    0,
+  );
+  assert.equal(task?.scheduled, "2026-06-01");
+  assert.deepEqual(task?.inlineFields.scheduled, ["2026-06-01"]);
+});
+
+test("US-111: emoji scheduled date wins over Dataview scheduled field", () => {
+  const task = parseTaskFromLine(
+    "test.md",
+    0,
+    "- [ ] task ⏳ 2026-06-02 [scheduled:: 2026-06-01]",
+    null,
+    0,
+  );
+  assert.equal(task?.scheduled, "2026-06-02");
+});
+
+test("US-111: only scheduled Dataview field maps to scheduled and invalid dates are ignored", () => {
+  const task = parseTaskFromLine(
+    "test.md",
+    0,
+    "- [ ] task [scheduled:: 2026-06-01] [planned:: 2026-06-02] [bad:: soon]",
+    null,
+    0,
+  );
+  const invalid = parseTaskFromLine(
+    "test.md",
+    1,
+    "- [ ] task [bad:: soon]",
+    null,
+    0,
+  );
+  assert.equal(task?.scheduled, "2026-06-01");
+  assert.equal(invalid?.scheduled, null);
+});
+
+test("US-111: parseTaskFromLine reads Dataview task date fields", () => {
+  const task = parseTaskFromLine(
+    "test.md",
+    0,
+    "- [x] task [created:: 2026-04-19] [start:: 2026-04-20] [scheduled:: 2026-04-24] [due:: 2026-05-15] [completion:: 2026-04-23] [cancelled:: 2026-04-22]",
+    null,
+    0,
+  );
+  assert.equal(task?.created, "2026-04-19");
+  assert.equal(task?.start, "2026-04-20");
+  assert.equal(task?.scheduled, "2026-04-24");
+  assert.equal(task?.deadline, "2026-05-15");
+  assert.equal(task?.completed, "2026-04-23");
+  assert.equal(task?.cancelled, "2026-04-22");
+});
+
+test("US-111: Tasks emoji dates win over Dataview date fields", () => {
+  const task = parseTaskFromLine(
+    "test.md",
+    0,
+    "- [x] task ➕ 2026-04-19 ✅ 2026-04-23 📅 2026-05-15 [created:: 2026-01-01] [completion:: 2026-01-02] [due:: 2026-01-03]",
+    null,
+    0,
+  );
+  assert.equal(task?.created, "2026-04-19");
+  assert.equal(task?.completed, "2026-04-23");
+  assert.equal(task?.deadline, "2026-05-15");
+});
+
 test("VAL-CORE-001: parseTaskFromLine extracts priority emoji", () => {
   const high = parseTaskFromLine("test.md", 0, "- [ ] urgent task ⏫", null, 0);
   assert.equal(high?.priority, "⏫");
@@ -262,6 +333,14 @@ test("VAL-CORE-001: parseTaskFromLine extracts priority emoji", () => {
   // No priority
   const none = parseTaskFromLine("test.md", 0, "- [ ] plain task", null, 0);
   assert.equal(none?.priority, null);
+});
+
+test("US-111: parseTaskFromLine maps Dataview priority field to priority rank", () => {
+  const high = parseTaskFromLine("test.md", 0, "- [ ] urgent task [priority:: high]", null, 0);
+  assert.equal(high?.priority, "⏫");
+
+  const lowest = parseTaskFromLine("test.md", 0, "- [ ] someday [priority:: lowest]", null, 0);
+  assert.equal(lowest?.priority, "⏬");
 });
 
 test("VAL-CORE-001: parseTaskFromLine extracts recurrence", () => {
@@ -286,6 +365,17 @@ test("VAL-CORE-001: parseTaskFromLine extracts recurrence", () => {
   // No recurrence
   const none = parseTaskFromLine("test.md", 0, "- [ ] plain task", null, 0);
   assert.equal(none?.recurrence, null);
+});
+
+test("US-111: parseTaskFromLine reads Dataview repeat field as recurrence", () => {
+  const task = parseTaskFromLine(
+    "test.md",
+    0,
+    "- [ ] review notes [repeat:: every week when done]",
+    null,
+    0,
+  );
+  assert.equal(task?.recurrence, "every week when done");
 });
 
 test("VAL-CORE-001: parseTaskFromLine computes calloutDepth", () => {

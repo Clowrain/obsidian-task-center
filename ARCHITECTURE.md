@@ -42,7 +42,7 @@ interface ParsedTask {
   title: string;           // 去掉 Obsidian Tasks token / tag / inline field 后的标题
   tags: string[];          // 合法 hashtag，字面保留，含 #
 
-  scheduled: string | null; // ⏳
+  scheduled: string | null; // ⏳ 或 [scheduled:: YYYY-MM-DD]；两者都有时 ⏳ 优先
   deadline: string | null;  // 📅
   start: string | null;     // 🛫
   completed: string | null; // ✅
@@ -213,6 +213,7 @@ interface PluginSettings {
   hiddenBuiltinTabIds: string[];
   lastActiveTabId?: string;
   stampCreatedByDefault: boolean;
+  taskFormatFlavor: "tasks" | "dataview";
 }
 ```
 
@@ -255,7 +256,7 @@ src/
 ├─ quickadd.ts
 ├─ status-bar.ts
 ├─ settings.ts
-├─ deps.ts                # Daily Notes / Tasks 依赖健康
+├─ deps.ts                # Daily Notes / task-format companion 依赖健康
 ├─ dates.ts
 ├─ i18n.ts
 ├─ styles.ts?             # 若需要 TS class 常量，不放颜色
@@ -518,6 +519,8 @@ Daily Notes enabled + folder configured
 
 Daily Notes 不可用时，add 失败并保留输入；不写 fallback 文件。（US-163 / US-701）
 
+任务格式读取固定兼容 Tasks emoji 与 Dataview bracket inline fields：日期字段映射为 `⏳`/`[scheduled::]`、`📅`/`[due::]`、`🛫`/`[start::]`、`➕`/`[created::]`、`✅`/`[completion::]`、`❌`/`[cancelled::]`，并读取 `🔁`/`[repeat::]` 与 priority emoji / `[priority::]`。若同一字段两种格式并存，Tasks emoji 是有效来源。写回由 `settings.taskFormatFlavor` 决定：`tasks` 写 emoji 字段，`dataview` 写 bracket inline fields。`setScheduled` / `setDeadline` / `markDone` / `markDropped` / `addTask` 是格式敏感写入入口；写入某一字段前必须清理该字段的另一种语法，清空排期则同时清理 `⏳` 与 `[scheduled::]`，避免读取优先级导致旧日期继续生效。（US-111 / US-407 / US-409）
+
 `stamp-created=true|false` 由 CLI 单次参数覆盖全局默认。（US-213）
 
 ## 6. Undo
@@ -634,7 +637,7 @@ E2E 和 UI 自动化依赖稳定 `data-*`，不依赖 CSS 类名或文案：
 | `[data-parent-picker]` | 移动端父任务选择器 |
 | `[data-parent-candidate-id="path:Lnnn"]` | 父任务候选行 |
 | `[data-parent-confirm]` | 父任务选择确认按钮 |
-| `[data-dep-warning="tasks-missing|tasks-disabled"]` | Tasks 依赖警告 |
+| `[data-dep-warning="task-format-companion-missing|task-format-companion-disabled"]` | Tasks / Dataview companion 依赖警告 |
 | `[data-test-cache-version="n"]` | cache 刷新版本 |
 
 变更这些契约必须同步改 e2e。
@@ -700,7 +703,7 @@ type ErrorCode =
 
 - Daily Notes 核心插件启用状态。
 - Daily Notes folder 配置。
-- Tasks 社区插件安装 / 启用状态。
+- task-format companion 安装 / 启用状态：Tasks 或 Dataview 任意一个启用即健康。
 
 检测结果提供给：
 

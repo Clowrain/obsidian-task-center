@@ -41,7 +41,7 @@ Install Task Center from Obsidian Community Plugins:
 
 ### Prerequisites
 
-1. Install and enable [Obsidian Tasks](https://github.com/obsidian-tasks-group/obsidian-tasks). Task Center reads and writes Tasks-compatible markdown and expects the Tasks plugin to remain the data-layer companion.
+1. Install and enable at least one task-format companion: [Obsidian Tasks](https://github.com/obsidian-tasks-group/obsidian-tasks) or [Dataview](https://github.com/blacksmithgu/obsidian-dataview). Task Center reads and writes both Tasks emoji and Dataview inline-field task metadata, and expects one of those companion plugins to render or query the same metadata elsewhere in your vault.
 2. Enable Obsidian's built-in **Daily Notes** core plugin and set its "New file location". Quick Add writes new tasks to today's Daily Note and refuses to fall back to an inbox when Daily Notes is missing or misconfigured.
 
 ## Quick Start
@@ -77,7 +77,27 @@ Drag a card to a date to change `⏳`. Drop it onto another card to nest it. Dro
 
 ## Syntax
 
-Task Center preserves Obsidian Tasks metadata such as `⏳`, `📅`, `🛫`, `➕`, and `✅`, and uses `[-] ❌ YYYY-MM-DD` for abandoned tasks.
+Task Center supports the two task-format flavors used by Obsidian Tasks:
+
+```markdown
+- [ ] Tasks emoji flavor ⏳ 2026-05-15 📅 2026-05-20 ➕ 2026-05-01 [estimate:: 90m]
+- [ ] Dataview flavor [scheduled:: 2026-05-15] [due:: 2026-05-20] [created:: 2026-05-01] [estimate:: 90m]
+```
+
+Reading is intentionally permissive: the board recognizes both flavors in the same vault. Writing is controlled by **Settings → Task Center → Task format flavor**. Dragging to a date, date prompts, Quick Add, and CLI mutations write new task metadata in that selected flavor. When Task Center rewrites a field, it removes the other flavor for that same field so stale dates do not keep winning later.
+
+| Meaning | Tasks emoji flavor | Dataview flavor | Task Center support |
+| --- | --- | --- | --- |
+| Scheduled | `⏳ YYYY-MM-DD` | `[scheduled:: YYYY-MM-DD]` | read/write |
+| Due / deadline | `📅 YYYY-MM-DD` | `[due:: YYYY-MM-DD]` | read/write |
+| Start | `🛫 YYYY-MM-DD` | `[start:: YYYY-MM-DD]` | read/preserve |
+| Created | `➕ YYYY-MM-DD` | `[created:: YYYY-MM-DD]` | read/write on add |
+| Completed | `✅ YYYY-MM-DD` | `[completion:: YYYY-MM-DD]` | read/write |
+| Cancelled / abandoned | `❌ YYYY-MM-DD` | `[cancelled:: YYYY-MM-DD]` | read/write with `[-]` status |
+| Recurrence | `🔁 every week` | `[repeat:: every week]` | read/preserve |
+| Priority | `🔺 ⏫ 🔼 🔽 ⏬` | `[priority:: highest/high/medium/low/lowest]` | read/preserve |
+
+If both flavors for the same date field are present on one line, the Tasks emoji value wins in Task Center. This matches a conservative “do not reinterpret old emoji data” rule while still letting Dataview-format vaults work naturally.
 
 Estimate and actual-time summaries use inline fields such as `[estimate:: 90m]`, `[estimate:: 1h30m]`, and `[actual:: 75m]`. Tags and unknown inline fields are preserved byte-for-byte.
 
@@ -129,6 +149,7 @@ The default repo config lives in `.crabbox.yaml` and points at `.github/workflow
 | Week starts on | Monday | Week and calendar boundaries |
 | Open Task Center on startup | Off | Whether the board opens with the vault |
 | Stamp created date | On | Whether new tasks get `➕ YYYY-MM-DD` |
+| Task format flavor | Tasks emoji | Whether Task Center writes Tasks emoji metadata or Dataview inline fields |
 | Force mobile layout | Off | Use the phone layout on wider screens |
 
 ## License

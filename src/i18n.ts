@@ -174,6 +174,11 @@ const EN = {
   "settings.stampCreated.name": "Stamp created date",
   "settings.stampCreated.desc":
     "Append ➕ today when adding new tasks. CLI can override per add.",
+  "settings.taskFormatFlavor.name": "Task format flavor",
+  "settings.taskFormatFlavor.desc":
+    "Read supports Tasks emoji and Dataview inline fields. New task metadata writes use this flavor.",
+  "settings.taskFormatFlavor.tasks": "Tasks emoji: ⏳ 📅 ➕ ✅",
+  "settings.taskFormatFlavor.dataview": "Dataview inline fields: [scheduled::] [due::]",
   "settings.mobileHeader": "Mobile",
   "settings.mobileLongPress.name": "Long-press duration (ms)",
   "settings.mobileLongPress.desc":
@@ -278,10 +283,10 @@ const EN = {
     "Daily Notes plugin disabled — new tasks cannot be created",
   "dep.dailyNotesNoFolder":
     "Daily Notes folder not set — new tasks cannot be created",
-  "dep.tasksMissing":
-    "Tasks community plugin not installed — Tasks-format extensions may not render",
-  "dep.tasksDisabled":
-    "Tasks community plugin disabled — Tasks-format extensions may not render",
+  "dep.taskFormatCompanionMissing":
+    "Install Tasks or Dataview — task metadata may not render or query elsewhere",
+  "dep.taskFormatCompanionDisabled":
+    "Enable Tasks or Dataview — task metadata may not render or query elsewhere",
   "dep.openSettings": "Click to open Obsidian settings",
 
   // US-720 (task #63): today execution view — entry-point tab that
@@ -540,6 +545,11 @@ const ZH: Partial<typeof EN> = {
   "settings.stampCreated.name": "自动打创建日期",
   "settings.stampCreated.desc":
     "新建任务时追加 ➕ 今天；CLI add 可单次覆盖。",
+  "settings.taskFormatFlavor.name": "任务格式风味",
+  "settings.taskFormatFlavor.desc":
+    "读取同时兼容 Tasks emoji 与 Dataview inline fields；新的任务元数据写入使用这里选择的风味。",
+  "settings.taskFormatFlavor.tasks": "Tasks emoji：⏳ 📅 ➕ ✅",
+  "settings.taskFormatFlavor.dataview": "Dataview inline fields：[scheduled::] [due::]",
   "settings.mobileHeader": "移动端",
   "settings.mobileLongPress.name": "长按时长 (ms)",
   "settings.mobileLongPress.desc":
@@ -630,10 +640,10 @@ const ZH: Partial<typeof EN> = {
     "Daily Notes 插件未启用 — 无法新建任务",
   "dep.dailyNotesNoFolder":
     "Daily Notes 未设置文件夹 — 无法新建任务",
-  "dep.tasksMissing":
-    "Tasks 社区插件未安装 — Tasks 扩展字段可能展示不完整",
-  "dep.tasksDisabled":
-    "Tasks 社区插件未启用 — Tasks 扩展字段可能展示不完整",
+  "dep.taskFormatCompanionMissing":
+    "请安装 Tasks 或 Dataview — 任务元数据在其他视图中可能无法展示或查询",
+  "dep.taskFormatCompanionDisabled":
+    "请启用 Tasks 或 Dataview — 任务元数据在其他视图中可能无法展示或查询",
   "dep.openSettings": "点击打开 Obsidian 设置",
 
   // US-720: 今日执行视图

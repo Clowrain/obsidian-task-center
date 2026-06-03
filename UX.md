@@ -418,6 +418,16 @@ estimate/actual/deadline 等 meta
 
 新建任务只能写入当天 Daily Note 文件尾：`- [ ] 任务名 ➕ 创建日期`。没有可用 Daily Note 时失败并提示配置 Daily Notes，不写入 inbox / fallback 文件。（US-163 / US-701）
 
+## 10.1 任务格式风味偏好
+
+设置页提供“任务格式风味”选项，默认值为 Tasks。（US-111）
+
+- 读取侧同时兼容 Tasks emoji 与 Dataview bracket inline fields。
+- 同一字段两种格式都存在时，界面以 Tasks emoji 为准。
+- 偏好为 Tasks 时，Quick Add、拖拽改期、日期选择、完成、放弃和 CLI 写 `⏳/📅/➕/✅/❌` 等 emoji 字段。
+- 偏好为 Dataview 时，同一批写操作写 `[scheduled::]`、`[due::]`、`[created::]`、`[completion::]`、`[cancelled::]`。
+- 写入某一字段会清理该字段的另一种语法，避免一行任务保留两个互相冲突的日期；清空排期会同时移除 `⏳` 与 `[scheduled::]`。
+
 ## 11. 卡片菜单、快捷键与 Undo
 
 ### 11.1 卡片菜单
@@ -601,11 +611,11 @@ Daily Notes：
 - 启用但未设置文件夹：提示“Daily Notes 未设置文件夹，无法新建任务”。（US-701b）
 - 配置修复后警告自动消失，无需重启。（US-701c）
 
-Obsidian Tasks：
+任务格式 companion：
 
-- 未安装：状态栏展示 `data-dep-warning="tasks-missing"`。（US-701d）
-- 已安装但禁用：展示 `data-dep-warning="tasks-disabled"`。（US-701e）
-- 正常启用：不显示 tasks 警告。（US-701f）
+- Tasks 与 Dataview 都未安装：状态栏展示 `data-dep-warning="task-format-companion-missing"`。（US-701d）
+- Tasks 或 Dataview 至少安装了一个但两者都未启用：展示 `data-dep-warning="task-format-companion-disabled"`。（US-701e）
+- Tasks 或 Dataview 任意一个正常启用：不显示任务格式 companion 警告。（US-701f）
 
 ## 16. CLI / AI Agent UX
 
