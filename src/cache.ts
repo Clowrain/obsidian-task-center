@@ -258,7 +258,12 @@ export class TaskCache {
     const inFlight = this.pending.get(path);
     if (inFlight) return inFlight;
     const cached = this.byPath.get(path);
-    if (cached) return cached;
+    if (cached) {
+      const af = this.app.vault.getAbstractFileByPath(path);
+      if (af instanceof TFile && af.extension === "md" && cached.mtime === af.stat.mtime) {
+        return cached;
+      }
+    }
     return this.invalidateFile(path);
   }
 

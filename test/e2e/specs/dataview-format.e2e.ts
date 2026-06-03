@@ -50,6 +50,12 @@ async function writeAndWait(path: string, body: string) {
     path,
     body,
   );
+  await browser.executeObsidian(async ({ app }, p: string) => {
+    // @ts-expect-error — runtime plugin test hook
+    await app.plugins.plugins["task-center"].cache.invalidateFile(p);
+    // @ts-expect-error — runtime plugin test hook
+    await app.plugins.plugins["task-center"].__forFlush();
+  }, path);
 }
 
 async function readFile(path: string): Promise<string> {

@@ -316,6 +316,31 @@ test("resolveRef path:Lnnn — single-file resolve, never triggers ensureAll", a
   assert.equal(cache.__stats.parseCount, 1);
 });
 
+test("resolveRef path:Lnnn: reparses a cached file when mtime changed without a changed event", async () => {
+  const app = makeApp([
+    {
+      path: "Tasks/a.md",
+      hasTask: false,
+      metaIndexed: true,
+      content: "not a task yet\n",
+      mtime: 1000,
+    },
+  ]);
+  const cache = new TaskCache(app);
+  cache.bind();
+
+  await cache.ensureFile("Tasks/a.md");
+
+  app._setContent("Tasks/a.md", "- [ ] Added after external vault reset\n");
+  app._setHasTask("Tasks/a.md", true);
+  app._setMtime("Tasks/a.md", 2000);
+
+  const t = await cache.resolveRef("Tasks/a.md:L1");
+  assert.ok(t, "path:L1 should resolve after an mtime-only content change");
+  assert.equal(t.title, "Added after external vault reset");
+  assert.equal(cache.__stats.parseCount, 1);
+});
+
 test("resolveRef hash — falls back to ensureAll only on first miss", async () => {
   const app = makeApp([
     { path: "Tasks/a.md", hasTask: true, content: "- [ ] Alpha\n" },
