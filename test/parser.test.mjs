@@ -46,7 +46,7 @@ const {
   parseFileTasks,
 } = await import("../test/.compiled/parser.js");
 const { deriveEffectiveTasks } = await import("../test/.compiled/task-tree.js");
-const { applyQueryFilters } = await import("../test/.compiled/filter.js");
+const { applyQueryFilters } = await import("../test/.compiled/query/filter.js");
 const { addDays, startOfWeek, endOfMonth, shiftMonth, resolveWhen, isValidISO } =
   await import("../test/.compiled/dates.js");
 
