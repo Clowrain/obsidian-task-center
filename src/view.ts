@@ -1150,6 +1150,15 @@ export class TaskCenterView extends ItemView {
 
     const utility = mainRow.createDiv({ cls: "bt-toolbar-utility" });
 
+    // US-809: "Load from Zentao" button. Only shown when Zentao is configured.
+    const zentao = this.plugin.settings.zentao;
+    if (zentao?.serverUrl && zentao?.account) {
+      const zentaoBtn = utility.createEl("button", { text: "🔄 禅道" });
+      zentaoBtn.addClass("bt-zentao-btn");
+      zentaoBtn.title = "从禅道加载任务";
+      zentaoBtn.addEventListener("click", () => this.loadFromZentao());
+    }
+
     // US-163: toolbar `+` opens Quick Add, which writes the new line to
     // today's daily-note tail (the only entry point — see writer.addTask
     // resolution order). Default scheduled = unset; user adds ⏳ inline
@@ -5419,6 +5428,84 @@ export class TaskCenterView extends ItemView {
       this.plugin.settings,
       this.collectKnownTags(),
     ).open();
+  }
+
+  // ── Zentao Integration (US-809~812) ──
+
+  private loadingFromZentao = false;
+
+  private async loadFromZentao(): Promise<void> {
+    if (this.loadingFromZentao) return;
+    const zentao = this.plugin.settings.zentao;
+    if (!zentao?.serverUrl || !zentao?.account) {
+      new Notice("禅道未配置，请在设置中填写连接信息");
+      return;
+    }
+
+    this.loadingFromZentao = true;
+    const btn = this.containerEl.querySelector(".bt-zentao-btn") as HTMLElement | null;
+    if (btn) {
+      btn.textContent = "加载中…";
+      btn.addClass("is-loading");
+    }
+
+    try {
+      const { ZentaoClient } = await import("./zentao/client");
+      const { syncZentaoTasks, getDateRangeForTab } = await import("./zentao/sync");
+      const { decrypt } = await import("./zentao/crypto");
+
+      // Get decrypted password
+      let password: string;
+      if (zentao.encryptionIv) {
+        const vaultPath = (this.app.vault.adapter as unknown as { basePath?: string }).basePath ?? "";
+        password = await decrypt(zentao.encryptedPassword, zentao.encryptionIv, vaultPath);
+      } else {
+        password = zentao.encryptedPassword;
+      }
+
+      const client = new ZentaoClient(zentao.serverUrl, zentao.account, async () => password);
+
+      // Determine date range from current tab (US-810)
+      const activePreset = this.getActiveTabPreset();
+      const dateRange = getDateRangeForTab(activePreset, this.plugin.settings.weekStartsOn);
+
+      const result = await syncZentaoTasks(client, zentao, this.app, {
+        taskFormatFlavor: this.plugin.settings.taskFormatFlavor,
+      }, dateRange);
+
+      // Report results (US-811)
+      const parts: string[] = [];
+      if (result.added > 0) parts.push(`新增 ${result.added} 条`);
+      if (result.updated > 0) parts.push(`更新 ${result.updated} 条`);
+      if (result.skipped > 0) parts.push(`跳过 ${result.skipped} 条`);
+      if (parts.length > 0) {
+        new Notice(`禅道同步完成：${parts.join("，")}`);
+      } else if (result.errors.length === 0) {
+        new Notice("禅道同步完成：无新任务");
+      }
+      for (const err of result.errors) {
+        new Notice(`禅道同步错误：${err}`);
+      }
+
+      // Refresh board to pick up new tasks
+      if (result.added > 0 || result.updated > 0) {
+        this.scheduleRefresh();
+      }
+    } catch (e) {
+      new Notice(`禅道加载失败：${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      this.loadingFromZentao = false;
+      if (btn) {
+        btn.textContent = "🔄 禅道";
+        btn.removeClass("is-loading");
+      }
+    }
+  }
+
+  private getActiveTabPreset(): string | undefined {
+    const tabId = this.state.activeTabId;
+    const preset = this.plugin.settings.queryPresets.find((p) => p.id === tabId);
+    return preset?.view?.preset;
   }
 
 }

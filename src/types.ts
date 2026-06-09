@@ -1,3 +1,5 @@
+import type { ZentaoSettings } from "./zentao/types";
+
 // US-305: `[-] ❌` is "abandoned" and is its own checkbox-status semantic
 // (`dropped`), separate from `done`. Keeping abandonment distinct lets
 // users see what they walked away from — not lumped into "completed"
@@ -99,6 +101,9 @@ export interface TaskCenterSettings {
   // layout regardless of width. UX-mobile §7.
   // see USER_STORIES.md
   mobileForceLayout: boolean; // default false (auto = follow viewport width)
+  // US-801~808: Zentao integration settings. null = not configured.
+  // When non-null, the "Load from Zentao" button appears in the board toolbar.
+  zentao: ZentaoSettings | null;
 }
 
 export type TaskFormatFlavor = "tasks" | "dataview";
@@ -257,6 +262,7 @@ export const DEFAULT_SETTINGS: TaskCenterSettings = {
   mobileLongPressMs: 500,
   mobileSwipeEnabled: true,
   mobileForceLayout: false,
+  zentao: null,
 };
 
 export const VIEW_TYPE_TASK_CENTER = "task-center-board";

@@ -1,7 +1,10 @@
-import { App, Notice, PluginSettingTab, Setting } from "obsidian";
+import { App, Notice, PluginSettingTab, Setting, FuzzySuggestModal } from "obsidian";
 import { t as tr } from "./i18n";
 import type TaskCenterPlugin from "./main";
 import { restoreBuiltinQueryPresets, visibleQueryPresets } from "./saved-views";
+import { DEFAULT_ZENTAO_SETTINGS, type ZentaoSettings } from "./zentao/types";
+import { ZentaoClient, type ZentaoExecution } from "./zentao/client";
+import { encrypt, decrypt, isCryptoAvailable } from "./zentao/crypto";
 
 const SKILL_INSTALL_COMMAND = "npx skills add CorrectRoadH/obsidian-task-center";
 
@@ -173,6 +176,9 @@ export class TaskCenterSettingTab extends PluginSettingTab {
       cls: "task-center-settings-command",
     });
 
+    // ── Zentao Integration (US-801~808) ──
+    this.renderZentaoSettings(containerEl);
+
     new Setting(containerEl).setName(tr("settings.cliHeader")).setHeading();
     const cliHelp = containerEl.createDiv({ cls: "setting-item-description" });
     cliHelp.createEl("p", { text: tr("settings.cliHelp") });
@@ -193,5 +199,272 @@ export class TaskCenterSettingTab extends PluginSettingTab {
       ].join("\n"),
     );
     cliHelp.createEl("p", { text: tr("settings.cliAiNote") });
+  }
+
+  // ── Zentao Integration Settings (US-801~808) ──
+
+  private renderZentaoSettings(containerEl: HTMLElement): void {
+    new Setting(containerEl).setName("禅道连接").setHeading();
+
+    const zentao = this.plugin.settings.zentao;
+    const cryptoOk = isCryptoAvailable();
+
+    // Server URL
+    new Setting(containerEl)
+      .setName("服务器地址")
+      .setDesc("格式：https://zentao.example.com，不带 /api.php")
+      .addText((txt) =>
+        txt
+          .setPlaceholder("https://zentao.example.com")
+          .setValue(zentao?.serverUrl ?? "")
+          .onChange(async (v) => {
+            this.ensureZentao();
+            this.plugin.settings.zentao!.serverUrl = v.trim();
+            await this.plugin.saveSettings();
+          }),
+      );
+
+    // Account
+    new Setting(containerEl)
+      .setName("账号")
+      .addText((txt) =>
+        txt
+          .setPlaceholder("admin")
+          .setValue(zentao?.account ?? "")
+          .onChange(async (v) => {
+            this.ensureZentao();
+            this.plugin.settings.zentao!.account = v.trim();
+            await this.plugin.saveSettings();
+          }),
+      );
+
+    // Password
+    new Setting(containerEl)
+      .setName("密码")
+      .setDesc(cryptoOk ? "加密存储，不以明文保存到 data.json" : "⚠️ 当前环境不支持加密，密码仅在本次会话有效")
+      .addText((txt) => {
+        txt
+          .setPlaceholder("••••••••")
+          .setValue("") // Never pre-fill password for security
+          .onChange(async (v) => {
+            if (!v) return;
+            this.ensureZentao();
+            if (cryptoOk) {
+              const vaultPath = (this.app.vault.adapter as unknown as { basePath?: string }).basePath ?? "";
+              const { encrypted, iv } = await encrypt(v, vaultPath);
+              this.plugin.settings.zentao!.encryptedPassword = encrypted;
+              this.plugin.settings.zentao!.encryptionIv = iv;
+            } else {
+              // Fallback: store as-is (user warned above)
+              this.plugin.settings.zentao!.encryptedPassword = v;
+              this.plugin.settings.zentao!.encryptionIv = "";
+            }
+            await this.plugin.saveSettings();
+          });
+        txt.inputEl.type = "password";
+      });
+
+    // Test connection
+    new Setting(containerEl)
+      .setName("测试连接")
+      .setDesc("验证服务器地址、账号和密码是否正确")
+      .addButton((btn) =>
+        btn
+          .setButtonText("测试连接")
+          .setDisabled(!zentao?.serverUrl || !zentao?.account)
+          .onClick(async () => {
+            const zs = this.plugin.settings.zentao;
+            if (!zs?.serverUrl || !zs?.account) return;
+            btn.setButtonText("连接中…").setDisabled(true);
+            try {
+              const password = await this.getZentaoPassword();
+              const client = new ZentaoClient(zs.serverUrl, zs.account, async () => password);
+              const result = await client.testConnection();
+              if (result.ok) {
+                new Notice("连接成功");
+              } else {
+                new Notice(`连接失败：${result.error}`);
+              }
+            } catch (e) {
+              new Notice(`连接失败：${e instanceof Error ? e.message : String(e)}`);
+            } finally {
+              btn.setButtonText("测试连接").setDisabled(false);
+            }
+          }),
+      );
+
+    // Sync mode
+    new Setting(containerEl)
+      .setName("同步模式")
+      .setDesc("选择如何拉取禅道任务")
+      .addDropdown((dd) =>
+        dd
+          .addOption("assignedtome", "全部指派给我的")
+          .addOption("manual", "手动选择执行")
+          .setValue(zentao?.syncMode ?? "assignedtome")
+          .onChange(async (v) => {
+            this.ensureZentao();
+            this.plugin.settings.zentao!.syncMode = v as "manual" | "assignedtome";
+            await this.plugin.saveSettings();
+            this.display(); // Refresh to show/hide execution list
+          }),
+      );
+
+    // Execution list (only for manual mode)
+    if (zentao?.syncMode === "manual") {
+      const execContainer = containerEl.createDiv({ cls: "setting-item-description" });
+
+      if (zentao.executionListCache && zentao.executionListCache.length > 0) {
+        const selectedIds = new Set(zentao.selectedExecutionIds);
+        for (const exec of zentao.executionListCache) {
+          new Setting(execContainer)
+            .setName(exec.name)
+            .setDesc(`${exec.projectName} · ${exec.status} · ${exec.begin} ~ ${exec.end}`)
+            .addToggle((tg) =>
+              tg.setValue(selectedIds.has(exec.id)).onChange(async (v) => {
+                this.ensureZentao();
+                if (v) {
+                  this.plugin.settings.zentao!.selectedExecutionIds.push(exec.id);
+                } else {
+                  this.plugin.settings.zentao!.selectedExecutionIds =
+                    this.plugin.settings.zentao!.selectedExecutionIds.filter((id) => id !== exec.id);
+                }
+                await this.plugin.saveSettings();
+              }),
+            );
+        }
+      } else {
+        execContainer.createEl("p", { text: "暂无执行，点击下方「刷新执行列表」" });
+      }
+
+      new Setting(containerEl)
+        .setName("刷新执行列表")
+        .addButton((btn) =>
+          btn.setButtonText("刷新").onClick(async () => {
+            const zs = this.plugin.settings.zentao;
+            if (!zs?.serverUrl) {
+              new Notice("请先填写服务器地址");
+              return;
+            }
+            btn.setButtonText("加载中…").setDisabled(true);
+            try {
+              const password = await this.getZentaoPassword();
+              const client = new ZentaoClient(zs.serverUrl, zs.account, async () => password);
+              const projects = await client.getProjects();
+              const executions = await client.getExecutions();
+              const projectMap = new Map(projects.map((p) => [p.id, p.name]));
+              this.ensureZentao();
+              this.plugin.settings.zentao!.executionListCache = executions.map((e) => ({
+                id: e.id,
+                project: e.project,
+                projectName: projectMap.get(e.project) ?? "未知项目",
+                name: e.name,
+                status: e.status,
+                begin: e.begin,
+                end: e.end,
+              }));
+              this.plugin.settings.zentao!.executionListCacheTime = Date.now();
+              await this.plugin.saveSettings();
+              this.display();
+              new Notice(`已加载 ${executions.length} 个执行`);
+            } catch (e) {
+              new Notice(`刷新失败：${e instanceof Error ? e.message : String(e)}`);
+            } finally {
+              btn.setButtonText("刷新").setDisabled(false);
+            }
+          }),
+        );
+    }
+
+    // Sync target
+    new Setting(containerEl)
+      .setName("同步目标")
+      .setDesc("禅道任务写入哪里")
+      .addDropdown((dd) =>
+        dd
+          .addOption("daily-note", "Daily Note（写入当天日记）")
+          .addOption("specified-file", "指定文件")
+          .setValue(zentao?.syncTarget ?? "daily-note")
+          .onChange(async (v) => {
+            this.ensureZentao();
+            this.plugin.settings.zentao!.syncTarget = v as "daily-note" | "specified-file";
+            await this.plugin.saveSettings();
+            this.display();
+          }),
+      );
+
+    // Specified file path (only when target is specified-file)
+    if (zentao?.syncTarget === "specified-file") {
+      new Setting(containerEl)
+        .setName("目标文件")
+        .setDesc(zentao.specifiedFilePath || "未选择")
+        .addButton((btn) =>
+          btn.setButtonText("选择文件").onClick(() => {
+            new FileSuggestModal(this.app, async (path: string) => {
+              this.ensureZentao();
+              this.plugin.settings.zentao!.specifiedFilePath = path;
+              await this.plugin.saveSettings();
+              this.display();
+            }).open();
+          }),
+        );
+    }
+
+    // Clear config
+    new Setting(containerEl)
+      .setName("清除禅道配置")
+      .setDesc("清除所有禅道连接配置（不删除已同步的任务）")
+      .addButton((btn) =>
+        btn
+          .setButtonText("清除配置")
+          .setWarning()
+          .onClick(async () => {
+            this.plugin.settings.zentao = null;
+            await this.plugin.saveSettings();
+            this.display();
+            new Notice("禅道配置已清除");
+          }),
+      );
+  }
+
+  /** Ensure zentao settings object exists (create default if null). */
+  private ensureZentao(): void {
+    if (!this.plugin.settings.zentao) {
+      this.plugin.settings.zentao = { ...DEFAULT_ZENTAO_SETTINGS };
+    }
+  }
+
+  /** Get the decrypted Zentao password from settings. */
+  private async getZentaoPassword(): Promise<string> {
+    const zs = this.plugin.settings.zentao;
+    if (!zs?.encryptedPassword) return "";
+    if (!zs.encryptionIv) return zs.encryptedPassword; // Unencrypted fallback
+    const vaultPath = (this.app.vault.adapter as unknown as { basePath?: string }).basePath ?? "";
+    return decrypt(zs.encryptedPassword, zs.encryptionIv, vaultPath);
+  }
+}
+
+// ── File Suggest Modal ──
+
+class FileSuggestModal extends FuzzySuggestModal<string> {
+  constructor(
+    app: App,
+    private onSelect: (path: string) => Promise<void>,
+  ) {
+    super(app);
+    this.setPlaceholder("选择 Markdown 文件…");
+  }
+
+  getItems(): string[] {
+    const files = this.app.vault.getMarkdownFiles();
+    return files.map((f) => f.path);
+  }
+
+  getItemText(item: string): string {
+    return item;
+  }
+
+  async onChooseItem(item: string): Promise<void> {
+    await this.onSelect(item);
   }
 }
