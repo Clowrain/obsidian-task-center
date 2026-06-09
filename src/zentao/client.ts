@@ -63,6 +63,13 @@ export class ZentaoError extends Error {
 
 // ── Client ──
 
+const REQUEST_TIMEOUT_MS = 15_000; // US-825
+
+function timeoutPromise(): Promise<never> {
+	return new Promise((_, reject) => {
+		window.setTimeout(() => reject(new ZentaoError("请求超时", "network_error")), REQUEST_TIMEOUT_MS);
+	});
+}
 
 export class ZentaoClient {
 	private token: string | null = null;
@@ -82,13 +89,16 @@ export class ZentaoClient {
 
 	private async request<T>(params: RequestUrlParam): Promise<T> {
 		try {
-			const response = await requestUrl({
-				...params,
-				headers: {
-					"Content-Type": "application/json",
-					...(params.headers ?? {}),
-				},
-			});
+			const response = await Promise.race([
+				requestUrl({
+					...params,
+					headers: {
+						"Content-Type": "application/json",
+						...(params.headers ?? {}),
+					},
+				}),
+				timeoutPromise(),
+			]);
 			return response.json as T;
 		} catch (e: unknown) {
 			const msg = e instanceof Error ? e.message : String(e);

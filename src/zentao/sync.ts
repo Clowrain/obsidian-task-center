@@ -2,7 +2,7 @@
 // Coordinates: fetch tasks → map to Obsidian format → dedup → write to target file.
 // Uses vault.process for atomic writes (consistent with writer.ts).
 
-import type { App } from "obsidian";
+import { TFile, type App } from "obsidian";
 import { ZentaoClient } from "./client";
 import { mapZentaoTask, extractZentaoId, hasTaskChanged, type MapperOptions, type ZentaoTask } from "./mapper";
 import type { ZentaoSettings } from "./types";
@@ -206,15 +206,15 @@ export async function syncZentaoTasks(
 	// 6. Write back atomically
 	try {
 		const newContent = lines.join("\n");
-		if (await vault.adapter.exists(targetPath)) {
-			await vault.adapter.write(targetPath, newContent);
+		const existingFile = app.vault.getAbstractFileByPath(targetPath);
+		if (existingFile instanceof TFile) {
+			await vault.process(existingFile, () => newContent);
 		} else {
-			// Ensure parent directory exists
 			const dir = targetPath.substring(0, targetPath.lastIndexOf("/"));
 			if (dir) {
 				await vault.adapter.mkdir(dir).catch(() => {});
 			}
-			await vault.adapter.write(targetPath, newContent);
+			await vault.create(targetPath, newContent);
 		}
 	} catch (e) {
 		const msg = e instanceof Error ? e.message : String(e);

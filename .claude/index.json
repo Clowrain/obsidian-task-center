@@ -1,0 +1,172 @@
+{
+  "timestamp": "2026-06-09T13:48:42+08:00",
+  "project": "obsidian-task-center",
+  "description": "Obsidian 插件：周/月视图 + 父子任务渲染 + 自然语言 Quick Add + 移动端手势",
+  "language": "TypeScript",
+  "framework": "Obsidian Plugin API",
+  "buildTool": "esbuild",
+  "packageManager": "pnpm@10.32.1",
+  "version": "0.8.23",
+  "rootClaude": "CLAUDE.md",
+  "modules": [
+    {
+      "path": "src",
+      "claudeMd": "src/CLAUDE.md",
+      "role": "插件核心源码（全部业务逻辑）",
+      "entry": "src/main.ts",
+      "interfaces": [
+        "src/cli.ts (TaskCenterApi)",
+        "src/view.ts (TaskCenterView)",
+        "src/cache.ts (TaskCache)"
+      ],
+      "tests": [
+        "test/parser.test.mjs",
+        "test/writer.test.mjs",
+        "test/cli.test.mjs",
+        "test/quickadd.test.mjs",
+        "test/cache.test.mjs",
+        "test/task-tree.test.mjs",
+        "test/i18n.test.mjs",
+        "test/saved-views.test.mjs",
+        "test/main-lifecycle.test.mjs"
+      ],
+      "importantPaths": [
+        "src/types.ts",
+        "src/parser.ts",
+        "src/writer.ts",
+        "src/cache.ts",
+        "src/task-tree.ts",
+        "src/cli.ts",
+        "src/view.ts",
+        "src/saved-views.ts",
+        "src/quickadd.ts"
+      ],
+      "coverage": {
+        "entryScanned": true,
+        "interfacesScanned": true,
+        "dependenciesScanned": true,
+        "dataModelScanned": true,
+        "testsMapped": true,
+        "gaps": []
+      }
+    },
+    {
+      "path": "src/query",
+      "claudeMd": "src/query/CLAUDE.md",
+      "role": "查询引擎（过滤/投影/摘要）",
+      "entry": "src/query/filter.ts",
+      "interfaces": [
+        "src/query/filter.ts (applyQueryFilters)",
+        "src/query/projection.ts (applyViewProjection)",
+        "src/query/summary.ts (computeSummary)"
+      ],
+      "tests": [
+        "test/query-filter.test.mjs",
+        "test/query-projection.test.mjs",
+        "test/query-summary.test.mjs",
+        "test/query-dsl.test.mjs"
+      ],
+      "importantPaths": [
+        "src/query/filter.ts",
+        "src/query/projection.ts",
+        "src/query/summary.ts"
+      ],
+      "coverage": {
+        "entryScanned": true,
+        "interfacesScanned": true,
+        "dependenciesScanned": true,
+        "dataModelScanned": true,
+        "testsMapped": true,
+        "gaps": []
+      }
+    },
+    {
+      "path": "src/view",
+      "claudeMd": "src/view/CLAUDE.md",
+      "role": "视图辅助模块（拖拽/手势/弹窗/撤销/布局）",
+      "entry": "src/view/state.ts",
+      "interfaces": [
+        "src/view/state.ts (ViewState, TabKey)",
+        "src/view/dnd.ts (TabDwellTracker)",
+        "src/view/touch.ts (attachLongPress, attachCardGestures)",
+        "src/view/bottom-sheet.ts (BottomSheet)",
+        "src/view/undo.ts (UndoStack)"
+      ],
+      "tests": [
+        "test/layout.test.mjs",
+        "test/filter-popover.test.mjs",
+        "test/source-dialog-api.test.mjs",
+        "test/source-open-state.test.mjs"
+      ],
+      "importantPaths": [
+        "src/view/state.ts",
+        "src/view/dnd.ts",
+        "src/view/touch.ts",
+        "src/view/bottom-sheet.ts",
+        "src/view/undo.ts",
+        "src/view/source-dialog.ts",
+        "src/view/query-dsl-modal.ts",
+        "src/view/saved-view-name-modal.ts"
+      ],
+      "coverage": {
+        "entryScanned": true,
+        "interfacesScanned": true,
+        "dependenciesScanned": true,
+        "dataModelScanned": false,
+        "testsMapped": true,
+        "gaps": []
+      }
+    },
+    {
+      "path": "test",
+      "claudeMd": "test/CLAUDE.md",
+      "role": "测试套件（单测 + e2e）",
+      "entry": null,
+      "interfaces": [],
+      "tests": [],
+      "importantPaths": [
+        "test/obsidian-stub.mjs",
+        "test/e2e/specs/board-basics.e2e.ts",
+        "test/e2e/specs/cli.e2e.ts",
+        "test/e2e/specs/parent-child.e2e.ts",
+        "test/e2e/specs/quickadd.e2e.ts",
+        "test/e2e/specs/mobile-coverage.e2e.ts"
+      ],
+      "coverage": {
+        "entryScanned": true,
+        "interfacesScanned": true,
+        "dependenciesScanned": true,
+        "dataModelScanned": true,
+        "testsMapped": true,
+        "gaps": []
+      }
+    }
+  ],
+  "scanCoverage": {
+    "totalFiles": 85,
+    "scannedFiles": 78,
+    "coveragePercent": 91.8,
+    "fileBreakdown": {
+      "src/*.ts": 25,
+      "src/query/*.ts": 3,
+      "src/view/*.ts": 11,
+      "test/*.test.mjs": 25,
+      "test/e2e/specs/*.e2e.ts": 21
+    },
+    "ignoredDirectories": [
+      "node_modules/",
+      ".git/",
+      ".github/ (CI workflows only)",
+      "test/.compiled/",
+      "test/e2e/vaults/*/.obsidian/"
+    ],
+    "skippedLargeFiles": [
+      "src/view.ts (5438 lines, partial read)",
+      "src/cli.ts (full interface scan, implementation not fully read)",
+      "src/saved-views.ts (full interface scan, implementation not fully read)"
+    ]
+  },
+  "truncated": false,
+  "gaps": [],
+  "nextSteps": []
+}

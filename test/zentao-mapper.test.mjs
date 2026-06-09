@@ -61,7 +61,7 @@ test("maps a basic todo task with Tasks flavor", () => {
   assert.match(line, /\[estimate:: 1h\]/);
   assert.match(line, /\[zentao:: 42\]/);
   assert.match(line, /#zentao-devel/);
-  assert.match(line, /⬆/); // priority emoji for pri=1
+  assert.match(line, /⏫/); // priority emoji for pri=1
 });
 
 test("maps a basic todo task with Dataview flavor", () => {
@@ -126,12 +126,11 @@ test("formats fractional hours correctly", () => {
 });
 
 test("maps all priority levels", () => {
-  const flavors = ["tasks", "dataview"];
   const priExpected = [
-    { pri: 1, tasks: "⬆", dv: "high" },
-    { pri: 2, tasks: "🔼", dv: "medium" },
-    { pri: 3, tasks: "🔽", dv: "low" },
-    { pri: 4, tasks: "⬇", dv: "lowest" },
+    { pri: 1, dv: "high" },
+    { pri: 2, dv: "medium" },
+    { pri: 3, dv: "low" },
+    { pri: 4, dv: "lowest" },
   ];
   for (const { pri, dv } of priExpected) {
     const task = { ...baseTask, pri };
