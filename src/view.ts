@@ -5421,35 +5421,39 @@ export class TaskCenterView extends ItemView {
   openContextMenu(e: MouseEvent, task: EffectiveTask) {
     const m = new Menu();
     const isZentaoTask = extractZentaoId(task.rawLine) !== null;
-    m.addItem((i) =>
-      i.setTitle(task.effectiveStatus === "done" ? tr("ctx.markTodo") : tr("ctx.markDone")).onClick(async () => {
-        if (task.effectiveStatus === "done") {
-          await this.runWithRemoveAnim(task.id, async () => {
-            await this.api.undone(task.id);
-          });
-        } else {
-          const zentaoId = extractZentaoId(task.rawLine);
-          if (zentaoId !== null) {
-            // US-826~830: Zentao task - show modal first, only mark done if API succeeds
-            const result = await this.showZentaoFinishModal(zentaoId, task);
-            if (result.success) {
+    // 完成/取消完成：禅道任务已完成时不显示取消完成（未调试完成）
+    // 禅道任务未完成时显示完成（已调试完成）
+    if (!isZentaoTask || task.effectiveStatus !== "done") {
+      m.addItem((i) =>
+        i.setTitle(task.effectiveStatus === "done" ? tr("ctx.markTodo") : tr("ctx.markDone")).onClick(async () => {
+          if (task.effectiveStatus === "done") {
+            await this.runWithRemoveAnim(task.id, async () => {
+              await this.api.undone(task.id);
+            });
+          } else {
+            const zentaoId = extractZentaoId(task.rawLine);
+            if (zentaoId !== null) {
+              // US-826~830: Zentao task - show modal first, only mark done if API succeeds
+              const result = await this.showZentaoFinishModal(zentaoId, task);
+              if (result.success) {
+                await this.runWithRemoveAnim(task.id, async () => {
+                  // Set actual time from Zentao consumed (if provided)
+                  if (result.consumedMinutes && result.consumedMinutes > 0) {
+                    await this.api.actual(task.id, result.consumedMinutes);
+                  }
+                  await this.api.done(task.id);
+                });
+              }
+            } else {
+              // Regular task - mark done directly
               await this.runWithRemoveAnim(task.id, async () => {
-                // Set actual time from Zentao consumed (if provided)
-                if (result.consumedMinutes && result.consumedMinutes > 0) {
-                  await this.api.actual(task.id, result.consumedMinutes);
-                }
                 await this.api.done(task.id);
               });
             }
-          } else {
-            // Regular task - mark done directly
-            await this.runWithRemoveAnim(task.id, async () => {
-              await this.api.done(task.id);
-            });
           }
-        }
-      }),
-    );
+        }),
+      );
+    }
     m.addItem((i) =>
       i.setTitle(tr("ctx.scheduleToday")).onClick(async () => {
         const target = todayISO();
