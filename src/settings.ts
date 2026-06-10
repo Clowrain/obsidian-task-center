@@ -1,10 +1,11 @@
-import { App, Notice, PluginSettingTab, Setting, FuzzySuggestModal } from "obsidian";
+import { App, ButtonComponent, Notice, PluginSettingTab, Setting, FuzzySuggestModal } from "obsidian";
 import { t as tr } from "./i18n";
 import type TaskCenterPlugin from "./main";
 import { restoreBuiltinQueryPresets, visibleQueryPresets } from "./saved-views";
-import { DEFAULT_ZENTAO_SETTINGS } from "./zentao/types";
+import { DEFAULT_ZENTAO_SETTINGS, ZENTAO_PASSWORD_KEY } from "./zentao/types";
 import { ZentaoClient } from "./zentao/client";
-import { encrypt, decrypt, isCryptoAvailable } from "./zentao/crypto";
+import { decrypt } from "./zentao/crypto";
+import { generateWeeklyReport } from "./zentao/weekly-report";
 
 const SKILL_INSTALL_COMMAND = "npx skills add CorrectRoadH/obsidian-task-center";
 
@@ -207,7 +208,14 @@ export class TaskCenterSettingTab extends PluginSettingTab {
     new Setting(containerEl).setName("禅道连接").setHeading();
 
     const zentao = this.plugin.settings.zentao;
-    const cryptoOk = isCryptoAvailable();
+
+    // Hold a reference so the text-input onChange callbacks can update the button state
+    let testBtn: ButtonComponent | null = null;
+
+    const updateTestBtnState = (): void => {
+      const zs = this.plugin.settings.zentao;
+      testBtn?.setDisabled(!zs?.serverUrl || !zs?.account);
+    };
 
     // Server URL
     new Setting(containerEl)
@@ -221,6 +229,7 @@ export class TaskCenterSettingTab extends PluginSettingTab {
             this.ensureZentao();
             this.plugin.settings.zentao!.serverUrl = v.trim();
             await this.plugin.saveSettings();
+            updateTestBtnState();
           }),
       );
 
@@ -235,13 +244,14 @@ export class TaskCenterSettingTab extends PluginSettingTab {
             this.ensureZentao();
             this.plugin.settings.zentao!.account = v.trim();
             await this.plugin.saveSettings();
+            updateTestBtnState();
           }),
       );
 
-    // Password
+    // Password (US-831: stored in Obsidian SecretStorage)
     new Setting(containerEl)
       .setName("密码")
-      .setDesc(cryptoOk ? "加密存储，不以明文保存到 data.json" : "⚠️ 当前环境不支持加密，密码仅在本次会话有效")
+      .setDesc("安全存储于 Obsidian 钥匙串，不以明文保存")
       .addText((txt) => {
         txt
           .setPlaceholder("••••••••")
@@ -249,16 +259,11 @@ export class TaskCenterSettingTab extends PluginSettingTab {
           .onChange(async (v) => {
             if (!v) return;
             this.ensureZentao();
-            if (cryptoOk) {
-              const vaultPath = (this.app.vault.adapter as unknown as { basePath?: string }).basePath ?? "";
-              const { encrypted, iv } = await encrypt(v, vaultPath);
-              this.plugin.settings.zentao!.encryptedPassword = encrypted;
-              this.plugin.settings.zentao!.encryptionIv = iv;
-            } else {
-              // Fallback: store as-is (user warned above)
-              this.plugin.settings.zentao!.encryptedPassword = v;
-              this.plugin.settings.zentao!.encryptionIv = "";
-            }
+            // US-831: Store password in Obsidian SecretStorage
+            await this.app.secretStorage.setSecret(ZENTAO_PASSWORD_KEY, v);
+            // Clear legacy encrypted fields after migration
+            this.plugin.settings.zentao!.encryptedPassword = "";
+            this.plugin.settings.zentao!.encryptionIv = "";
             await this.plugin.saveSettings();
           });
         txt.inputEl.type = "password";
@@ -268,11 +273,12 @@ export class TaskCenterSettingTab extends PluginSettingTab {
     new Setting(containerEl)
       .setName("测试连接")
       .setDesc("验证服务器地址、账号和密码是否正确")
-      .addButton((btn) =>
+      .addButton((btn) => {
         btn
           .setButtonText("测试连接")
-          .setDisabled(!zentao?.serverUrl || !zentao?.account)
-          .onClick(async () => {
+          .setDisabled(!zentao?.serverUrl || !zentao?.account);
+        testBtn = btn;
+        btn.onClick(async () => {
             const zs = this.plugin.settings.zentao;
             if (!zs?.serverUrl || !zs?.account) return;
             btn.setButtonText("连接中…").setDisabled(true);
@@ -290,8 +296,8 @@ export class TaskCenterSettingTab extends PluginSettingTab {
             } finally {
               btn.setButtonText("测试连接").setDisabled(false);
             }
-          }),
-      );
+          });
+      });
 
     // Sync mode
     new Setting(containerEl)
@@ -383,11 +389,12 @@ export class TaskCenterSettingTab extends PluginSettingTab {
       .addDropdown((dd) =>
         dd
           .addOption("daily-note", "Daily note（写入当天日记）")
-          .addOption("specified-file", "Specified file")
-          .setValue(zentao?.syncTarget ?? "daily-note")
+          .addOption("specified-file", "Specified file（写入指定文件）")
+          .addOption("project-folder", "Project folder（按项目分文件）")
+          .setValue(zentao?.syncTarget ?? "project-folder")
           .onChange(async (v) => {
             this.ensureZentao();
-            this.plugin.settings.zentao!.syncTarget = v as "daily-note" | "specified-file";
+            this.plugin.settings.zentao!.syncTarget = v as "daily-note" | "specified-file" | "project-folder";
             await this.plugin.saveSettings();
             this.display();
           }),
@@ -406,6 +413,50 @@ export class TaskCenterSettingTab extends PluginSettingTab {
               this.plugin.saveSettings().then(() => this.display()).catch(() => {});
             }).open();
           }),
+        );
+    }
+
+    // Project folder (only when target is project-folder)
+    if (zentao?.syncTarget === "project-folder") {
+      new Setting(containerEl)
+        .setName("项目目录")
+        .setDesc("任务将写入 {目录}/{项目名}.md，如 ZentaoTasks/运维.md")
+        .addText((txt) =>
+          txt
+            .setPlaceholder("ZentaoTasks")
+            .setValue(zentao?.projectFolder ?? "ZentaoTasks")
+            .onChange(async (v) => {
+              this.ensureZentao();
+              this.plugin.settings.zentao!.projectFolder = v.trim() || "ZentaoTasks";
+              await this.plugin.saveSettings();
+            }),
+        );
+
+      // US-833: Weekly report folder
+      new Setting(containerEl)
+        .setName("周报目录")
+        .setDesc("周报将写入 {目录}/{YYYY-MM-DD（第N周）}.md")
+        .addText((txt) =>
+          txt
+            .setPlaceholder("WeeklyReports")
+            .setValue(zentao?.weeklyReportFolder ?? "WeeklyReports")
+            .onChange(async (v) => {
+              this.ensureZentao();
+              this.plugin.settings.zentao!.weeklyReportFolder = v.trim() || "WeeklyReports";
+              await this.plugin.saveSettings();
+            }),
+        );
+
+      // Generate weekly report button
+      new Setting(containerEl)
+        .setName("生成周报")
+        .setDesc("根据本周完成任务和下周计划生成周报")
+        .addButton((btn) =>
+          btn
+            .setButtonText("生成周报")
+            .onClick(async () => {
+              await this.generateWeeklyReport();
+            }),
         );
     }
 
@@ -433,13 +484,70 @@ export class TaskCenterSettingTab extends PluginSettingTab {
     }
   }
 
-  /** Get the decrypted Zentao password from settings. */
+  /** Get the Zentao password from SecretStorage, with legacy migration. */
   private async getZentaoPassword(): Promise<string> {
+    // US-831: First try SecretStorage
+    const secretPassword = await this.app.secretStorage.getSecret(ZENTAO_PASSWORD_KEY);
+    if (secretPassword) return secretPassword;
+
+    // Legacy migration: if SecretStorage is empty but we have encrypted password, migrate it
     const zs = this.plugin.settings.zentao;
-    if (!zs?.encryptedPassword) return "";
-    if (!zs.encryptionIv) return zs.encryptedPassword; // Unencrypted fallback
-    const vaultPath = (this.app.vault.adapter as unknown as { basePath?: string }).basePath ?? "";
-    return decrypt(zs.encryptedPassword, zs.encryptionIv, vaultPath);
+    if (zs?.encryptedPassword) {
+      let password = "";
+      if (zs.encryptionIv) {
+        // Decrypt legacy AES-256-GCM password
+        const vaultPath = (this.app.vault.adapter as unknown as { basePath?: string }).basePath ?? "";
+        password = await decrypt(zs.encryptedPassword, zs.encryptionIv, vaultPath);
+      } else {
+        // Unencrypted fallback (shouldn't happen in normal use)
+        password = zs.encryptedPassword;
+      }
+
+      if (password) {
+        // Migrate to SecretStorage
+        await this.app.secretStorage.setSecret(ZENTAO_PASSWORD_KEY, password);
+        // Clear legacy fields
+        zs.encryptedPassword = "";
+        zs.encryptionIv = "";
+        await this.plugin.saveSettings();
+        console.log("[zentao] Password migrated to SecretStorage");
+        return password;
+      }
+    }
+
+    return "";
+  }
+
+  private async generateWeeklyReport(): Promise<void> {
+    const zs = this.plugin.settings.zentao;
+    if (!zs?.serverUrl || !zs.account) {
+      new Notice("请先完成禅道连接配置");
+      return;
+    }
+
+    try {
+      const password = await this.getZentaoPassword();
+      if (!password) {
+        new Notice("请先填写禅道密码");
+        return;
+      }
+
+      const client = new ZentaoClient(zs.serverUrl, zs.account, () => Promise.resolve(password));
+      const result = await generateWeeklyReport(
+        client,
+        zs,
+        this.app,
+        {
+          taskFormatFlavor: this.plugin.settings.taskFormatFlavor,
+          serverUrl: zs.serverUrl,
+        },
+        this.plugin.settings.weekStartsOn,
+      );
+
+      new Notice(`周报已生成：${result.path}`);
+    } catch (e) {
+      new Notice(`生成周报失败：${e instanceof Error ? e.message : String(e)}`);
+    }
   }
 }
 
