@@ -5420,6 +5420,7 @@ export class TaskCenterView extends ItemView {
   // see USER_STORIES.md
   openContextMenu(e: MouseEvent, task: EffectiveTask) {
     const m = new Menu();
+    const isZentaoTask = extractZentaoId(task.rawLine) !== null;
     m.addItem((i) =>
       i.setTitle(task.effectiveStatus === "done" ? tr("ctx.markTodo") : tr("ctx.markDone")).onClick(async () => {
         if (task.effectiveStatus === "done") {
@@ -5477,24 +5478,30 @@ export class TaskCenterView extends ItemView {
         }
       }),
     );
-    m.addItem((i) =>
-      i.setTitle(tr("ctx.clearSchedule")).onClick(async () => {
-        if (task.scheduled) {
-          await this.runWithRemoveAnim(task.id, async () => {
-            await this.api.schedule(task.id, null);
-          });
-          // US-826~830: sync deadline to Zentao after local schedule
-          void this.syncZentaoDeadline(task.id, null);
-        } else {
-          this.scheduleRefresh();
-        }
-      }),
-    );
-    m.addItem((i) =>
-      i.setTitle(tr("ctx.drop")).onClick(async () => {
-        await this.runWithRemoveAnim(task.id, () => this.api.drop(task.id));
-      }),
-    );
+    // 清除排期：禅道任务暂不支持（未调试完成）
+    if (!isZentaoTask) {
+      m.addItem((i) =>
+        i.setTitle(tr("ctx.clearSchedule")).onClick(async () => {
+          if (task.scheduled) {
+            await this.runWithRemoveAnim(task.id, async () => {
+              await this.api.schedule(task.id, null);
+            });
+            // US-826~830: sync deadline to Zentao after local schedule
+            void this.syncZentaoDeadline(task.id, null);
+          } else {
+            this.scheduleRefresh();
+          }
+        }),
+      );
+    }
+    // 放弃：禅道任务暂不支持（未调试完成）
+    if (!isZentaoTask) {
+      m.addItem((i) =>
+        i.setTitle(tr("ctx.drop")).onClick(async () => {
+          await this.runWithRemoveAnim(task.id, () => this.api.drop(task.id));
+        }),
+      );
+    }
 
     // Zentao task detail link (only if task has zentao ID and serverUrl configured)
     const zentaoId = extractZentaoId(task.rawLine);
