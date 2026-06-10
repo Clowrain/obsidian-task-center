@@ -58,7 +58,8 @@ export function filterCompletedThisWeek(tasks: ZentaoTask[], thisWeek: WeeklyRan
 }
 
 export function filterCompletedFromCache(tasks: ParsedTask[], thisWeek: WeeklyRange): ZentaoTask[] {
-	return tasks.filter((task) => {
+	console.log("[weekly-report] filterCompletedFromCache: input tasks:", tasks.length);
+	const filtered = tasks.filter((task) => {
 		const zentaoMatch = task.rawLine?.match(/\[zentao::\s*(\d+)\]/);
 		if (!zentaoMatch) return false;
 		if (task.status !== "done") return false;
@@ -66,28 +67,108 @@ export function filterCompletedFromCache(tasks: ParsedTask[], thisWeek: WeeklyRa
 		if (!completedMatch) return false;
 		const completedDate = completedMatch[1];
 		return completedDate >= thisWeek.start && completedDate <= thisWeek.end;
-	}).map((task) => ({
-		id: parseInt(task.rawLine?.match(/\[zentao::\s*(\d+)\]/)?.[1] || "0"),
-		name: task.title,
-		status: "done",
-		finishedDate: task.rawLine?.match(/✅\s*(\d{4}-\d{2}-\d{2})/)?.[1] || "",
-		project: 0,
-		projectName: "",
-		execution: 0,
-		parent: 0,
-		type: "",
-		pri: 3,
-		deadline: "",
-		estStarted: "",
-		estimate: "0",
-		consumed: "0",
-		assignedTo: "",
-		openedBy: "",
-		openedDate: "",
-		finishedBy: null,
-		closedDate: "",
-		desc: "",
-	}));
+	}).map((task) => {
+		// 从 path 提取项目名称
+		// path 格式: ZentaoTasks/${projectName}/${executionName}.md
+		// 期望输出: projectName/executionName，如果两者相同则只返回一个
+		const pathParts = task.path.split("/");
+		let projectName = "";
+		if (pathParts.length > 2) {
+			const secondLevel = pathParts[1];  // projectName
+			const thirdLevel = pathParts[2].replace(/\.md$/, "");  // executionName (去掉 .md)
+			if (secondLevel === thirdLevel) {
+				projectName = secondLevel;  // 两个名字一致，只返回一个
+			} else {
+				projectName = `${secondLevel}/${thirdLevel}`;
+			}
+		} else if (pathParts.length > 1) {
+			projectName = pathParts[1].replace(/\.md$/, "");
+		}
+		console.log("[weekly-report] task:", task.title, "path:", task.path, "projectName:", projectName);
+		return {
+			id: parseInt(task.rawLine?.match(/\[zentao::\s*(\d+)\]/)?.[1] || "0"),
+			name: task.title,
+			status: "done",
+			finishedDate: task.rawLine?.match(/✅\s*(\d{4}-\d{2}-\d{2})/)?.[1] || "",
+			project: 0,
+			projectName: projectName,
+			execution: 0,
+			parent: 0,
+			type: "",
+			pri: 3,
+			deadline: "",
+			estStarted: "",
+			estimate: "0",
+			consumed: "0",
+			assignedTo: "",
+			openedBy: "",
+			openedDate: "",
+			finishedBy: null,
+			closedDate: "",
+			desc: "",
+		};
+	});
+	console.log("[weekly-report] filterCompletedFromCache: filtered tasks:", filtered.length);
+	return filtered;
+}
+
+export function filterPlannedFromCache(tasks: ParsedTask[], nextWeek: WeeklyRange): ZentaoTask[] {
+	console.log("[weekly-report] filterPlannedFromCache: input tasks:", tasks.length);
+	const filtered = tasks.filter((task) => {
+		const zentaoMatch = task.rawLine?.match(/\[zentao::\s*(\d+)\]/);
+		if (!zentaoMatch) return false;
+		// 筛选未完成的任务（status 不是 done）
+		if (task.status === "done") return false;
+		// 筛选有 deadline 且在下周范围内
+		// deadline 可能是 ⏳ YYYY-MM-DD 或 scheduled 字段
+		const deadlineMatch = task.rawLine?.match(/⏳\s*(\d{4}-\d{2}-\d{2})/);
+		if (!deadlineMatch) return false;
+		const deadline = deadlineMatch[1];
+		return deadline >= nextWeek.start && deadline <= nextWeek.end;
+	}).map((task) => {
+		// 从 path 提取项目名称
+		const pathParts = task.path.split("/");
+		let projectName = "";
+		if (pathParts.length > 2) {
+			const secondLevel = pathParts[1];
+			const thirdLevel = pathParts[2].replace(/\.md$/, "");
+			if (secondLevel === thirdLevel) {
+				projectName = secondLevel;
+			} else {
+				projectName = `${secondLevel}/${thirdLevel}`;
+			}
+		} else if (pathParts.length > 1) {
+			projectName = pathParts[1].replace(/\.md$/, "");
+		}
+		// 提取 estimate（可能没有）
+		const estimateMatch = task.rawLine?.match(/\[estimate::\s*([\d.]+[hm]?)]/);
+		const estimate = estimateMatch ? estimateMatch[1] : "0";
+		console.log("[weekly-report] planned task:", task.title, "path:", task.path, "projectName:", projectName);
+		return {
+			id: parseInt(task.rawLine?.match(/\[zentao::\s*(\d+)\]/)?.[1] || "0"),
+			name: task.title,
+			status: task.status,
+			deadline: task.rawLine?.match(/⏳\s*(\d{4}-\d{2}-\d{2})/)?.[1] || "",
+			project: 0,
+			projectName: projectName,
+			execution: 0,
+			parent: 0,
+			type: "",
+			pri: 3,
+			estStarted: "",
+			estimate: estimate,
+			consumed: "0",
+			assignedTo: "",
+			openedBy: "",
+			openedDate: "",
+			finishedBy: null,
+			finishedDate: "",
+			closedDate: "",
+			desc: "",
+		};
+	});
+	console.log("[weekly-report] filterPlannedFromCache: filtered tasks:", filtered.length);
+	return filtered;
 }
 
 /** Filter tasks planned for next week (status=wait/doing, deadline in range). */
@@ -175,6 +256,10 @@ export function renderWeeklyReport(
 ): string {
 	const lines: string[] = [];
 
+	// 开头添加空行，避免 --- 被当作 YAML front matter
+	lines.push("");
+	lines.push("");
+
 	// 本周工作
 	lines.push("---");
 	lines.push("# 本周工作");
@@ -186,6 +271,7 @@ export function renderWeeklyReport(
 	} else {
 		for (const [projectName, tasks] of completedGroups) {
 			lines.push(`## ${projectName}`);
+			lines.push("");  // 第一个任务前空行
 			// 按 finishedDate 排序（周一→周日）
 			const sorted = [...tasks].sort((a, b) => {
 				const aDate = a.finishedDate?.slice(0, 10) ?? "";
@@ -197,6 +283,7 @@ export function renderWeeklyReport(
 				const weekday = fd ? formatWeekday(fd) : "";
 				lines.push(`- ${task.name}（${weekday} 完成）`);
 			}
+			lines.push("");  // 最后一个任务后空行
 		}
 	}
 
@@ -211,6 +298,7 @@ export function renderWeeklyReport(
 	} else {
 		for (const [projectName, tasks] of plannedGroups) {
 			lines.push(`## ${projectName}`);
+			lines.push("");  // 第一个任务前空行
 			// 按 deadline 排序（周一→周日）
 			const sorted = [...tasks].sort((a, b) => {
 				const aDate = a.deadline?.slice(0, 10) ?? "";
@@ -224,6 +312,7 @@ export function renderWeeklyReport(
 				const taskLine = hours ? `${task.name} （${hours} ${weekday}）` : `${task.name} （${weekday}）`;
 				lines.push(`- ${taskLine}`);
 			}
+			lines.push("");  // 最后一个任务后空行
 		}
 	}
 
@@ -266,8 +355,11 @@ export async function generateWeeklyReport(
 	const completed = cachedTasks.length > 0
 		? filterCompletedFromCache(cachedTasks, thisWeek)
 		: filterCompletedThisWeek(zentaoTasks, thisWeek);
-	const planned = filterPlannedNextWeek(zentaoTasks, nextWeek);
+	const planned = cachedTasks.length > 0
+		? filterPlannedFromCache(cachedTasks, nextWeek)
+		: filterPlannedNextWeek(zentaoTasks, nextWeek);
 	const content = renderWeeklyReport(completed, planned, weekNum, thisWeek.start, resolvedWeekStartsOn);
+	console.log("[weekly-report] renderWeeklyReport output (first 500 chars):", content.slice(0, 500));
 	const folder = settings.weeklyReportFolder || "WeeklyReports";
 	const path = `${folder}/${thisWeek.start}（第${weekNum}周）.md`;
 

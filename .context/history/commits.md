@@ -2,10 +2,14 @@
 
 ## 2026-06-10
 
+### fix(zentao): 周报项目名称路径解析逻辑调整
+- **Branch**: main
+- **Files**: src/zentao/weekly-report.ts
+- **Decisions**:
+  - 从缓存获取下周工作任务
+  - 项目名称格式: projectName/executionName，相同则只返回一个
+  - 开头添加空行避免 YAML front matter 问题
+  - 任务前后添加空行
+
 ### feat(zentao): 周报数据来源调整 + 同步任务存储重构
 - **Branch**: main
-- **Files**: src/zentao/mapper.ts, src/zentao/client.ts, src/zentao/sync.ts, src/zentao/weekly-report.ts, src/view.ts
-- **Decisions**:
-  - 周报本周工作从 Obsidian 缓存获取已完成任务
-  - 同步任务存储: projectName === executionName 或无 executionName 时写入 projectName/projectName.md
-  - 添加 ZentaoTask.executionName 字段
