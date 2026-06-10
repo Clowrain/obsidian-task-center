@@ -263,6 +263,11 @@ const EN = {
   "sheet.cancel": "Cancel",
   "sheet.save": "Save",
 
+  // US-826~829: Zentao finish sync notifications
+  "zentao.syncFinish.success": "已完成（已同步禅道）",
+  "zentao.syncFinish.failed": "已完成（禅道同步失败：{msg})",
+  "zentao.syncFinish.error": "禅道同步出错：{msg}",
+
   // task #43: date prompt hint line — bilingual EN baseline (the original
   // hard-coded string already mixed today/tomorrow with 明天/周六; we
   // preserve that mix here and route through tr() so a CN session gets
@@ -626,6 +631,11 @@ const ZH: Partial<typeof EN> = {
   "sheet.editTagRemove": "移除 {tag}",
   "sheet.cancel": "取消",
   "sheet.save": "保存",
+
+  // US-826~829: 禅道完成同步提示
+  "zentao.syncFinish.success": "已完成（已同步禅道）",
+  "zentao.syncFinish.failed": "已完成（禅道同步失败：{msg})",
+  "zentao.syncFinish.error": "禅道同步出错：{msg}",
 
   // task #43: 日期弹窗提示
   "prompt.dateHint":

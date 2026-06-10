@@ -137,20 +137,27 @@ export class ZentaoClient {
 
 	// ── Classic page API: cookie-based login & task fetch ──
 
-	/** Parse ALL cookies from set-cookie array and return combined cookie string. */
+	/** Parse cookies from set-cookie array, deduplicating zentaosid (keep last one). */
 	private parseAllCookies(headers: Record<string, unknown>): string | null {
 		const raw = headers["set-cookie"] ?? headers["Set-Cookie"];
 		if (!raw) return null;
 		// raw may be string or array
 		const cookieArr = Array.isArray(raw) ? raw : [String(raw)];
-		// Extract name=value from each cookie (ignore attributes like path/expires)
-		const pairs: string[] = [];
+		// Extract name=value from each cookie, dedupe zentaosid
+		const pairs: Map<string, string> = new Map();
 		for (const c of cookieArr) {
-			const match = String(c).match(/^([^=]+=[^;]+)/);
-			if (match) pairs.push(match[1]);
+			const match = String(c).match(/^([^=]+)=([^;]+)/);
+			if (match) {
+				const [, name, value] = match;
+				// For zentaosid, keep only the last (most recent login session)
+				if (name === "zentaosid" || !pairs.has(name)) {
+					pairs.set(name, `${name}=${value}`);
+				}
+			}
 		}
-		console.log("[zentao-classic] parsed cookies:", pairs.join("; "));
-		return pairs.length > 0 ? pairs.join("; ") : null;
+		const result = Array.from(pairs.values()).join("; ");
+		console.log("[zentao-classic] parsed cookies:", result);
+		return result.length > 0 ? result : null;
 	}
 
 		/**
@@ -287,7 +294,19 @@ export class ZentaoClient {
 		const taskData = await this.classicRequest<any>(fullUrl);
 		console.log("[zentao-fetch] taskData keys:", taskData ? Object.keys(taskData).join(", ") : "null");
 
-		const data = taskData?.data ?? taskData;
+		// Parse nested JSON string if needed
+		let data: any;
+		if (taskData?.data && typeof taskData.data === "string") {
+			try {
+				data = JSON.parse(taskData.data);
+				console.log("[zentao-fetch] parsed nested data, keys:", Object.keys(data).join(", "));
+			} catch {
+				data = taskData.data;
+			}
+		} else {
+			data = taskData?.data ?? taskData;
+		}
+
 		const rawTasks: ClassicTaskRaw[] = data?.tasks ?? [];
 		console.log("[zentao-fetch] raw tasks count:", rawTasks.length);
 
@@ -314,6 +333,87 @@ export class ZentaoClient {
 	invalidateToken(): void {
 		this.token = null;
 		this.allCookies = null;
+	}
+
+	// ── US-826~829: Finish task sync ──
+
+	/**
+	 * Finish a task in Zentao via classic page API.
+	 * Uses multipart/form-data POST with cookie authentication.
+	 * @param taskId Zentao task ID
+	 * @param options Finish options (finishedDate, currentConsumed, etc.)
+	 */
+	async finishTask(
+		taskId: number,
+		options: {
+			finishedDate?: string; // YYYY-MM-DD HH:mm, defaults to now
+			currentConsumed?: string; // hours, defaults to "0"
+			assignedTo?: string; // account, defaults to this.account
+			realStarted?: string; // YYYY-MM-DD HH:mm, optional
+			comment?: string; // optional
+		} = {},
+	): Promise<{ success: boolean; message?: string }> {
+		// Ensure cookies are available
+		if (!this.allCookies) await this.classicLogin();
+		// After classicLogin, allCookies should be set
+		if (!this.allCookies) {
+			return { success: false, message: "禅道认证失败，无法同步" };
+		}
+
+		const now = new Date();
+		const finishedDate = options.finishedDate ?? `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")} ${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
+		const currentConsumed = options.currentConsumed ?? "0";
+		const assignedTo = options.assignedTo ?? this.account;
+
+		// Build multipart/form-data body
+		const boundary = `----WebKitFormBoundary${Math.random().toString(36).slice(2, 15)}`;
+		const parts: string[] = [];
+
+		parts.push(`--${boundary}\r\nContent-Disposition: form-data; name="currentConsumed"\r\n\r\n${currentConsumed}`);
+		parts.push(`--${boundary}\r\nContent-Disposition: form-data; name="assignedTo"\r\n\r\n${assignedTo}`);
+		if (options.realStarted) {
+			parts.push(`--${boundary}\r\nContent-Disposition: form-data; name="realStarted"\r\n\r\n${options.realStarted}`);
+		}
+		parts.push(`--${boundary}\r\nContent-Disposition: form-data; name="finishedDate"\r\n\r\n${finishedDate}`);
+		parts.push(`--${boundary}\r\nContent-Disposition: form-data; name="files[]"; filename=""\r\nContent-Type: application/octet-stream\r\n\r\n`);
+		if (options.comment) {
+			parts.push(`--${boundary}\r\nContent-Disposition: form-data; name="comment"\r\n\r\n${options.comment}`);
+		}
+		// uid is a random identifier for the request
+		const uid = Math.random().toString(16).slice(2, 15);
+		parts.push(`--${boundary}\r\nContent-Disposition: form-data; name="uid"\r\n\r\n${uid}`);
+		parts.push(`--${boundary}--`);
+
+		const body = parts.join("\r\n");
+
+		try {
+			const response = await Promise.race([
+				requestUrl({
+					url: `${this.serverUrl}/index.php?m=task&f=finish&taskID=${taskId}`,
+					method: "POST",
+					headers: {
+						"Content-Type": `multipart/form-data; boundary=${boundary}`,
+						Cookie: this.allCookies,
+						"X-Requested-With": "XMLHttpRequest",
+					},
+					body,
+				}),
+				timeoutPromise(),
+			]);
+
+			const result = response.json;
+			console.log("[zentao-finish] response:", result);
+
+			if (result?.status === "success" || result?.message === "success") {
+				return { success: true };
+			}
+
+			return { success: false, message: result?.message ?? "未知错误" };
+		} catch (e) {
+			const msg = e instanceof Error ? e.message : String(e);
+			console.error("[zentao-finish] error:", msg);
+			return { success: false, message: msg };
+		}
 	}
 }
 
@@ -342,6 +442,7 @@ function convertClassicTask(raw: ClassicTaskRaw): ZentaoTask {
 	return {
 		id: raw.id,
 		project: raw.project,
+		projectName: raw.projectName ?? "",
 		execution: raw.execution ?? raw.executionID ?? 0,
 		parent: raw.parent ?? 0,
 		name: raw.name ?? "",

@@ -28,6 +28,7 @@ import { t as tr, getLocale } from "./i18n";
 import { animateOut } from "./anim";
 import { TabDwellTracker } from "./view/dnd";
 import { UndoStack, UndoEntry, UndoOp } from "./view/undo";
+import { extractZentaoId } from "./zentao/mapper";
 import { BottomSheet } from "./view/bottom-sheet";
 import { attachCardGestures, attachLongPress } from "./view/touch";
 import { shouldCloseFilterPopoverOnPointerDown, isClickInsideFilterControls } from "./view/filter-popover";
@@ -4396,8 +4397,16 @@ export class TaskCenterView extends ItemView {
       void (async () => {
         e.stopPropagation();
         await this.runWithRemoveAnim(t.id, async () => {
-          if (t.effectiveStatus === "done") await this.api.undone(t.id);
-          else await this.api.done(t.id);
+          if (t.effectiveStatus === "done") {
+            await this.api.undone(t.id);
+          } else {
+            await this.api.done(t.id);
+            // US-826~829: sync finish status to Zentao if this is a Zentao task
+            const zentaoId = extractZentaoId(t.rawLine);
+            if (zentaoId !== null) {
+              await this.syncZentaoFinish(zentaoId, t);
+            }
+          }
         });
       })();
     });
@@ -5392,6 +5401,19 @@ export class TaskCenterView extends ItemView {
         await this.runWithRemoveAnim(task.id, () => this.api.drop(task.id));
       }),
     );
+
+    // Zentao task detail link (only if task has zentao ID and serverUrl configured)
+    const zentaoId = extractZentaoId(task.rawLine);
+    const zentaoSettings = this.plugin.settings.zentao;
+    if (zentaoId && zentaoSettings?.serverUrl) {
+      m.addItem((i) =>
+        i.setTitle("查看").onClick(() => {
+          const url = `${zentaoSettings.serverUrl}/index.php?m=task&f=view&id=${zentaoId}`;
+          window.open(url, "_blank");
+        }),
+      );
+    }
+
     m.showAtMouseEvent(e);
   }
 
@@ -5508,6 +5530,48 @@ export class TaskCenterView extends ItemView {
 
   private getActiveTabPreset(): string | undefined {
     return this.activeSavedView().view.preset;
+  }
+
+  // US-826~829: sync finish status to Zentao
+  private async syncZentaoFinish(zentaoId: number, task: EffectiveTask): Promise<void> {
+    const zentao = this.plugin.settings.zentao;
+    if (!zentao?.serverUrl || !zentao?.account || !zentao?.encryptedPassword) {
+      // Zentao not configured, skip sync silently
+      return;
+    }
+
+    try {
+      const { ZentaoClient } = await import("./zentao/client");
+      const { decrypt } = await import("./zentao/crypto");
+
+      // Get decrypted password
+      let password: string;
+      if (zentao.encryptionIv) {
+        const vaultPath = (this.app.vault.adapter as unknown as { basePath?: string }).basePath ?? "";
+        password = await decrypt(zentao.encryptedPassword, zentao.encryptionIv, vaultPath);
+      } else {
+        password = zentao.encryptedPassword;
+      }
+
+      const client = new ZentaoClient(zentao.serverUrl, zentao.account, () => Promise.resolve(password));
+
+      // Extract estimate/actual from task for currentConsumed
+      const consumed = task.estimate?.toString() ?? task.actual?.toString() ?? "0";
+
+      const result = await client.finishTask(zentaoId, {
+        currentConsumed: consumed,
+        assignedTo: zentao.account,
+      });
+
+      if (result.success) {
+        new Notice(tr("zentao.syncFinish.success"));
+      } else {
+        new Notice(tr("zentao.syncFinish.failed", { msg: result.message ?? "未知错误" }));
+      }
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      new Notice(tr("zentao.syncFinish.error", { msg }));
+    }
   }
 
 }

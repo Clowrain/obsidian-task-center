@@ -911,10 +911,10 @@ npx skills add CorrectRoadH/obsidian-task-center
 
 核心原则：
 
-1. **导入是单向的**：禅道 → Obsidian。不在 Obsidian 中反向同步状态回禅道。
-2. **导入后即归 Obsidian 管**：导入的任务是普通 Markdown 行，后续编辑、完成、放弃走 Task Center 已有能力。
-3. **去重靠禅道任务 ID**：同一禅道任务不重复创建行。
-4. **导入是手动触发的**：不自动轮询。用户在看板中点击按钮才拉取。
+1. **导入是手动触发的**：不自动轮询。用户在看板中点击按钮才拉取。
+2. **导入后即归 Obsidian 管**：导入的任务是普通 Markdown 行，后续编辑、排期走 Task Center 已有能力。
+3. **完成状态双向同步**：禅道任务在 Obsidian 中完成时，同步调用禅道 finish API。
+4. **去重靠禅道任务 ID**：同一禅道任务不重复创建行。
 
 ### 20.2 用户画像
 
@@ -1038,11 +1038,48 @@ Daily Notes 不可用时（US-701），Daily Note 模式不可选，提示用户
 
 `US-825` 网络超时设为 15 秒。移动端弱网环境下不无限等待。
 
-### 20.12 非目标
+### 20.12 完成状态双向同步
+
+`US-826` 用户在看板中完成一个禅道任务（通过勾选、拖拽、手势等方式）时，插件在本地完成标记写入后，调用禅道 finish API 同步状态。
+
+- 禅道任务判定：任务行包含 `[zentao:: {id}]` inline field。
+- 非禅道任务：走原有完成逻辑，不调用禅道 API。
+- API 调用失败时：Obsidian 本地完成状态不变，toast 提示"禅道同步失败：{原因}"。
+
+`US-827` 禅道 finish API 调用参数：
+
+| 参数 | 来源 | 说明 |
+|------|------|------|
+| `taskID` | `[zentao:: {id}]` | URL query 参数 |
+| `finishedDate` | 当前时间 | 格式 `YYYY-MM-DD HH:mm` |
+| `currentConsumed` | `[estimate::]` 或默认 `0` | 已消耗工时 |
+| `assignedTo` | 当前禅道账号 | 保持原指派 |
+| `realStarted` | `[start::]` 或跳过 | 实际开始时间 |
+| `comment` | 空 | 不自动添加评论 |
+
+`US-828` finish API 使用 classic page API（cookie 认证），与任务拉取保持一致：
+
+- URL: `{serverUrl}/index.php?m=task&f=finish&taskID={id}`
+- Method: POST
+- Content-Type: multipart/form-data
+- Cookie: 使用已有的 `zentaosid` cookie
+
+`US-829` 完成同步流程：
+
+1. 用户触发完成操作（勾选 / 拖拽 / 手势 / CLI）
+2. Task Center writer 写入本地完成标记（`- [x]` + `✅ YYYY-MM-DD`）
+3. 检查任务是否有 `[zentao:: {id}]`
+4. 有 → 调用禅道 finish API
+5. API 成功 → toast "已完成（已同步禅道）"
+6. API 失败 → toast "已完成（禅道同步失败：{原因})"，本地状态不变
+
+`US-830` 移动端手势完成禅道任务时，同步调用同样生效。toast 显示在移动端底部。
+
+### 20.13 非目标
 
 以下场景明确不在本次范围内：
 
-- **反向同步**：不从 Obsidian 向禅道同步任务状态。
+- **放弃状态同步**：放弃任务不调用禅道 cancel API，仅本地标记。
 - **自动定时拉取**：不设定时器自动轮询。用户手动触发。
 - **禅道子任务映射为 Obsidian 子任务**：禅道父子任务在导入时展平为独立顶层任务。
 - **禅道评论 / 附件 / 关联需求**：只导入任务本身。

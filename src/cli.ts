@@ -1,4 +1,4 @@
-import { App } from "obsidian";
+import { App, Notice } from "obsidian";
 import {
   ParsedTask,
   TaskStatus,
@@ -7,6 +7,7 @@ import {
   type QueryViewType,
   type TaskFormatFlavor,
 } from "./types";
+import type { ZentaoSettings } from "./zentao/types";
 import { formatMinutes } from "./parser";
 import {
   setScheduled,
@@ -28,6 +29,7 @@ import { TaskCache } from "./cache";
 import { todayISO, resolveWhen, isValidISO } from "./dates";
 import { t as tr } from "./i18n";
 import { cliGroupingLabel, normalizeGroupingTags } from "./grouping";
+import { extractZentaoId } from "./zentao/mapper";
 import { deriveEffectiveTasks, type EffectiveTask } from "./task-tree";
 import { normalizeQueryPreset } from "./saved-views";
 import { applyQueryFilters } from "./query/filter";
