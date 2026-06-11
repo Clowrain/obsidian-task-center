@@ -64,6 +64,12 @@ const EN = {
   "trash.title": "Abandon",
   "trash.hint": "Drop here → [-] ❌",
   "trash.dropped": "Abandoned",
+
+  // Holiday-cn: Chinese holiday markers for week/month view date headers.
+  "holiday.off": "off",
+  "holiday.work": "work",
+  "holiday.tooltip": "{name} · {kind}",
+
   "dnd.inheritedSchedule":
     "Schedule is inherited from parent; edit source or move out of parent first.",
   "dnd.droppedUndo": "dropped",
@@ -477,6 +483,12 @@ const ZH: Partial<typeof EN> = {
   "trash.title": "放弃区",
   "trash.hint": "拖到此处 → [-] ❌",
   "trash.dropped": "已放弃",
+
+  // Holiday-cn: 中国节假日标记（休/补）
+  "holiday.off": "休",
+  "holiday.work": "补",
+  "holiday.tooltip": "{name} · {kind}",
+
   "dnd.inheritedSchedule":
     "排期继承自父任务，请编辑源 Markdown 或将任务移出父级。",
   "dnd.droppedUndo": "放弃",

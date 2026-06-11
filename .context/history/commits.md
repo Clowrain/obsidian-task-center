@@ -1,5 +1,18 @@
 # Commits History
 
+## 2026-06-11
+
+### feat(holiday): 看板视图显示中国节假日标记（休/补）
+- **Branch**: main
+- **Files**: src/holiday/service.ts, src/holiday/types.ts, src/view.ts, src/main.ts, src/i18n.ts, styles.css
+- **Decisions**:
+  - 新增独立 HolidayService 模块，不污染 TaskCache
+  - 采用"同步读取 + 异步预取"模式，不阻塞渲染
+  - 普通周末（周六/周日）自动显示"休"标记
+  - API 数据优先（补班日显示"补"而非"休"）
+  - 缓存仅在 session 期间有效，Obsidian 关闭时自动失效
+  - 数据来源: https://raw.githubusercontent.com/NateScarlet/holiday-cn/master/{year}.json
+
 ## 2026-06-10
 
 ### fix(zentao): 完成任务工时支持小数输入（如 0.5）

@@ -17,6 +17,7 @@ import {
 import { TaskCache } from "./cache";
 import { StatusBar } from "./status-bar";
 import { DepHealthBanner } from "./dep-health";
+import { HolidayService } from "./holiday/service";
 import { QuickAddModal } from "./quickadd";
 import { t as tr } from "./i18n";
 import { todayISO } from "./dates";
@@ -62,6 +63,7 @@ export default class TaskCenterPlugin extends Plugin {
   settings!: TaskCenterSettings;
   api!: TaskCenterApi;
   cache!: TaskCache;
+  holidayService: HolidayService = new HolidayService();
   private statusBar: StatusBar | null = null;
   private depHealth: DepHealthBanner | null = null;
 
@@ -167,6 +169,7 @@ export default class TaskCenterPlugin extends Plugin {
     this.depHealth?.dispose();
     this.depHealth = null;
     this.cache?.dispose();
+    this.holidayService.destroy();
   }
 
   private registerTaskCenterView(): void {

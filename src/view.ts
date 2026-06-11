@@ -33,6 +33,7 @@ import { ZENTAO_PASSWORD_KEY } from "./zentao/types";
 import { ZentaoClient } from "./zentao/client";
 import { getDateRangeForTab, syncZentaoTasks } from "./zentao/sync";
 import { generateWeeklyReport } from "./zentao/weekly-report";
+import type { HolidayMarker } from "./holiday/types";
 import { BottomSheet } from "./view/bottom-sheet";
 import { attachCardGestures, attachLongPress } from "./view/touch";
 import { shouldCloseFilterPopoverOnPointerDown, isClickInsideFilterControls } from "./view/filter-popover";
@@ -248,6 +249,8 @@ export class TaskCenterView extends ItemView {
       expandedDays: new Set(),
       selectedMonthDay: null,
     };
+    // Set up holiday service refresh callback
+    this.plugin.holidayService.setRefreshCallback(() => this.scheduleRefresh());
   }
 
   getViewType(): string {
@@ -2745,6 +2748,10 @@ export class TaskCenterView extends ItemView {
     const days: string[] = [];
     for (let i = 0; i < 7; i++) days.push(addDays(weekStart, i));
 
+    // Prefetch holiday data for visible years (async, non-blocking)
+    const years = new Set(days.map((d) => parseInt(d.slice(0, 4), 10)));
+    this.plugin.holidayService.prefetchYears(years);
+
     const filter = this.getTextFilter();
     const effectiveTasks = this.getEffectiveTasks();
 
@@ -2812,6 +2819,8 @@ export class TaskCenterView extends ItemView {
         cls: "bt-week-dow",
       });
       head.createSpan({ text: `${pad(d.getMonth() + 1)}-${pad(d.getDate())}`, cls: "bt-week-date" });
+      // Holiday marker (休/补) — synchronized read from cache
+      this.renderHolidayBadge(head, day);
       const stats = head.createSpan({
         text: this.columnStats(dayTasksRecomputed),
         cls: "bt-week-stats",
@@ -2839,6 +2848,23 @@ export class TaskCenterView extends ItemView {
     const sum = tasks.reduce((s, t) => s + (t.estimate ?? 0), 0);
     if (sum === 0) return `${tasks.length}`;
     return `${tasks.length} · ${formatMinutes(sum)}`;
+  }
+
+  /**
+   * Render holiday marker badge (休/补) for a given date.
+   * Reads synchronously from HolidayService cache; no blocking on fetch.
+   * Shows tooltip with holiday name on hover.
+   */
+  private renderHolidayBadge(parent: HTMLElement, date: string): void {
+    const marker = this.plugin.holidayService.getMarker(date);
+    if (!marker) return;
+
+    const kindLabel = tr(marker.kind === "off" ? "holiday.off" : "holiday.work");
+    const badge = parent.createSpan({
+      text: kindLabel,
+      cls: `bt-holiday bt-holiday-${marker.kind}`,
+    });
+    badge.title = tr("holiday.tooltip", { name: marker.name, kind: kindLabel });
   }
 
   /**
@@ -2919,6 +2945,10 @@ export class TaskCenterView extends ItemView {
       if (i >= 27 && d > last) break;
     }
 
+    // Prefetch holiday data for visible years (async, non-blocking)
+    const years = new Set(gridDays.map((d) => parseInt(d.slice(0, 4), 10)));
+    this.plugin.holidayService.prefetchYears(years);
+
     const wrapper = parent.createDiv({ cls: "bt-month" });
     wrapper.dataset.view = "month";
     // DOW header
@@ -2975,6 +3005,8 @@ export class TaskCenterView extends ItemView {
       if (day === selectedDay) selectedDayTasks = dayTasks;
       const head = cell.createDiv({ cls: "bt-month-cell-head" });
       head.createSpan({ text: `${dObj.getDate()}`, cls: "bt-month-cell-date" });
+      // Holiday marker (休/补) — synchronized read from cache
+      this.renderHolidayBadge(head, day);
       if (dayTasks.length > 0) {
         head.createSpan({ text: `${dayTasks.length}`, cls: "bt-month-cell-count" });
       }
