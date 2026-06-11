@@ -361,8 +361,10 @@ export class ZentaoClient {
 
 		const now = new Date();
 		const finishedDate = options.finishedDate ?? `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")} ${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
-		// currentConsumed must be an integer (hours), minimum 1
-		const currentConsumed = parseInt(options.currentConsumed ?? "1") || 1;
+		// currentConsumed can be decimal (hours), minimum 0.5
+		// parseFloat supports decimal input like "0.5" (30 minutes)
+		const parsed = parseFloat(options.currentConsumed ?? "1");
+		const currentConsumed = parsed > 0 ? parsed : 1;
 		const assignedTo = options.assignedTo ?? this.account;
 
 		// Build JSON request body (REST API format)
